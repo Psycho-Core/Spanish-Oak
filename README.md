@@ -8,6 +8,8 @@ I am actively seeking to test this software on circa 2005 Ford Crown Victorias, 
 
 Update 11/11/2024 -Aston Martin Dual EEC-VI Flashing is now working and available.
 
+Update 20/12/2014 -Both flash tools are now able to use a variety of J2534 tools, including the Ford VCM2 and Tactrix Openport. This was made possible by aoke minor edits to the J2534 implementation.
+
 
 ***
 ## Aston Martin Tool
