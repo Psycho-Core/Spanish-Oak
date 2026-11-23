@@ -16,6 +16,11 @@ Tactrix Openport, etc.).
 
 ## New in this release
 
+* **Checksum discovery** - `psychoflash checksums --in stock.bin --b known-good.bin` finds the
+  checksum field (offset, width, endianness), the scheme (sum16/crc32/sum32) and the region, by
+  requiring a match in *both* images. Derive it from evidence instead of buying a parameter
+  database.
+
 * **`psychoflash live`** - stream standard OBD-II data (mode 01): rpm, coolant, throttle, MAF,
   speed, battery. `--pid 0C,05,11 --interval 250 --count 20 --csv`. Works while cranking, so
   "0 rpm" vs "180 rpm" answers the crank-sensor question immediately.

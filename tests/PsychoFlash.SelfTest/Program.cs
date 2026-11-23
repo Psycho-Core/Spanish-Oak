@@ -28,6 +28,7 @@ namespace PsychoFlash.SelfTest
             TestReadResponseFraming();
             TestImageTools();
             TestImageDiffAndChecksums();
+            TestChecksumDiscovery();
             TestObdPids();
             TestDiagnosticCodes();
             TestNegativeResponseCodes();
@@ -417,6 +418,63 @@ namespace PsychoFlash.SelfTest
             // CRC-32 of "123456789" is the standard check value.
             byte[] check = System.Text.Encoding.ASCII.GetBytes("123456789");
             CheckEqual(0xCBF43926, ImageTools.Crc32(check, 0, check.Length), "crc32 check value");
+        }
+
+        /// <summary>
+        /// Checksum discovery, proven on a synthetic image pair: a calibration with a sum32 stored
+        /// big endian at a known offset must be found, and an unrelated pair must produce nothing.
+        /// This is the mechanism that lets the checksum scheme be derived from a stock image plus a
+        /// known-good flashed one, instead of guessed.
+        /// </summary>
+        private static void TestChecksumDiscovery()
+        {
+            Console.WriteLine("Checksum discovery from an image pair");
+
+            const int size = 0x100000;
+            const int fieldOffset = 0x100;          // inside the boot block, outside the calibration
+            byte[] stock = new byte[size];
+            for (int i = 0; i < size; i++) stock[i] = (byte)(i * 7);   // non trivial data
+            uint stockSum = ImageTools.Sum32(stock, 0x010000, size - 0x10000);
+            WriteBigEndian(stock, fieldOffset, stockSum);
+
+            byte[] modified = new byte[size];
+            Array.Copy(stock, modified, size);
+            modified[0x0A0000] = (byte)(stock[0x0A0000] ^ 0xFF);       // one calibration byte changes
+            modified[0x0A0001] = (byte)(stock[0x0A0001] ^ 0x5A);
+            uint modifiedSum = ImageTools.Sum32(modified, 0x010000, size - 0x10000);
+            WriteBigEndian(modified, fieldOffset, modifiedSum);
+
+            IList<ChecksumFinding> findings = ChecksumScanner.Scan(stock, modified, null);
+            Check(findings.Count >= 1, "the stored checksum is found (" + findings.Count + " finding(s))");
+
+            bool exact = false;
+            foreach (ChecksumFinding finding in findings)
+            {
+                if (finding.Offset == fieldOffset && finding.Size == 4 && finding.BigEndian &&
+                    finding.Scheme == "sum32" && finding.Region.Name == "calibration" &&
+                    finding.StoredInStock == stockSum && finding.StoredInModified == modifiedSum)
+                {
+                    exact = true;
+                }
+            }
+            Check(exact, "offset, size, endianness, scheme and region all identified");
+
+            CheckEqual(0, ChecksumScanner.Scan(stock, stock, null).Count, "identical images produce no findings");
+
+            byte[] unrelated = new byte[size];
+            for (int i = 0; i < size; i++) unrelated[i] = (byte)(i * 13);
+            CheckEqual(0, ChecksumScanner.Scan(stock, unrelated, null).Count, "unrelated images produce no false finding");
+
+            IList<ChecksumRegion> regions = ChecksumScanner.DefaultRegions(size);
+            CheckEqual(3, regions.Count, "whole image, boot block and calibration are scanned by default");
+        }
+
+        private static void WriteBigEndian(byte[] data, int offset, uint value)
+        {
+            data[offset] = (byte)(value >> 24);
+            data[offset + 1] = (byte)(value >> 16);
+            data[offset + 2] = (byte)(value >> 8);
+            data[offset + 3] = (byte)value;
         }
 
         private static void TestNegativeResponseCodes()

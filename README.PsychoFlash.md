@@ -31,7 +31,9 @@ still have to provide.
   signal. No proprietary tables needed.
 * **Image diff** - `psychoflash diff --a stock.bin --b tuned.bin` shows exactly which bytes a tune
   changed and whether any of them sit outside the window that actually gets flashed.
-* **Checksum report** - `psychoflash checksums --in file.bin` prints candidate sums per region.
+* **Checksum report and discovery** - `psychoflash checksums --in file.bin` prints candidate sums
+  per region; add `--b <known-good.bin>` and it finds *which* scheme, region, offset and width the
+  PCM's checksum actually uses, by matching against both images.
   The tool does **not** rewrite Ford checksums; see [docs/CHECKSUMS.md](docs/CHECKSUMS.md) for why
   and for the evidence that would allow it.
 * **Read and clear stored fault codes** (`0x19` / `0x14`) - no FEPS needed, so it works on a car

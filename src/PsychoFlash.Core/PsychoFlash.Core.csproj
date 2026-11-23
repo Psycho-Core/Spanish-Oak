@@ -7,7 +7,7 @@
     <RootNamespace>PsychoFlash.Core</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <Version>1.5.0</Version>
+    <Version>1.6.0</Version>
     <Description>PsychoFlash core: SAE J2534 interop, ISO-TP transport and Ford EEC-VI (Spanish Oak) flashing protocol.</Description>
   </PropertyGroup>
 

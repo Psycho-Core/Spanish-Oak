@@ -128,6 +128,7 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  live [--pid 0C,05,11]      Stream live sensor data (OBD-II mode 01), Ctrl+C to stop");
             Console.WriteLine("  diff --a <file> --b <file> Show which bytes differ between two images");
             Console.WriteLine("  checksums --in <file>      Print checksum candidates for an image");
+            Console.WriteLine("  checksums --in <stock> --b <known-good>   Find where the checksum lives and which scheme");
             Console.WriteLine();
             Console.WriteLine("Options");
             Console.WriteLine("  --dll <path>               J2534 driver DLL (default: first interface in the registry)");
@@ -153,6 +154,7 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  psychoflash identify");
             Console.WriteLine("  psychoflash live --pid 0C --interval 250");
             Console.WriteLine("  psychoflash diff --a stock.bin --b tuned.bin");
+            Console.WriteLine("  psychoflash checksums --in stock.bin --b known-good-tune.bin");
             Console.WriteLine("  psychoflash info --in barra-stock.bin");
             Console.WriteLine("  psychoflash diagnose");
             Console.WriteLine("  psychoflash unlock --seed-only");
@@ -647,6 +649,27 @@ namespace PsychoFlash.Cli
 
             byte[] image = File.ReadAllBytes(path);
             Console.WriteLine("File        : " + Path.GetFileName(path) + "  " + image.Length.ToString("N0") + " bytes");
+
+            // With a second image the tool goes looking for the checksum itself.
+            string other;
+            if (parsed.TryGetValue("b", out other) && File.Exists(other))
+            {
+                byte[] known = File.ReadAllBytes(other);
+                Console.WriteLine("Compare with: " + Path.GetFileName(other) + "  " + known.Length.ToString("N0") + " bytes");
+                Console.WriteLine();
+                IList<ChecksumFinding> findings = ChecksumScanner.Scan(image, known, null);
+                if (findings.Count == 0)
+                {
+                    Console.WriteLine("No checksum field matched: the pair is not related, the images are");
+                    Console.WriteLine("identical, or the scheme is not sum16/sum32/crc32.");
+                }
+                else
+                {
+                    Console.WriteLine("Candidate checksum field(s) - value changed AND equals the scheme in both images:");
+                    foreach (ChecksumFinding finding in findings) Console.WriteLine("  " + finding);
+                }
+                Console.WriteLine();
+            }
             Report("whole image", image, 0, image.Length);
 
             if (image.Length >= 0x100000)

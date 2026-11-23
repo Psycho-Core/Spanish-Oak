@@ -40,6 +40,36 @@ column changes consistently across several known-good tunes is the likely Ford s
 4 bytes it disagreed with tell you where the stored value lives. That is a two-image problem you
 can solve with evidence instead of guesswork.
 
+## Deriving the scheme yourself from two images
+
+If you can get hold of **one** image from the same operating system that a known-good tool flashed
+and the PCM accepted - a tuner's file, a mate's tune, a second-hand PCM you read out - the scheme
+can be measured instead of bought:
+
+```console
+psychoflash checksums --in stock.bin --b known-good.bin
+```
+
+The scanner looks at the bytes that differ between the two, and reports any 2- or 4-byte field
+whose stored value equals a candidate scheme (sum16, crc32, sum32) computed over the whole image,
+the boot block or the calibration area - **in both images**. Matching twice is what makes a hit
+credible: a random 4-byte word will not reproduce two different sums.
+
+What you get back looks like:
+
+```
+0x000104  32-bit big endian  =  sum32 over calibration   (0x3F2281A4 -> 0x3F2287C6)
+```
+
+That single line tells you the algorithm, the region, the width and endianness and where the field
+lives - everything a checksum fixer needs - and it came from evidence, not a guess. Pairs that
+differ in more than 1% of the image are rejected: at that point 16-bit schemes match by chance and
+the output would be noise.
+
+Two honest limits: the scanner covers the three schemes above (a Ford-specific table-driven CRC is
+not among them), and a PCM that excludes the checksum field from its own calculation needs the
+region adjusted by hand. Both are visible the moment the candidate fails to reproduce the value.
+
 ## What would let PsychoFlash correct checksums properly
 
 Any one of these, in order of usefulness:
