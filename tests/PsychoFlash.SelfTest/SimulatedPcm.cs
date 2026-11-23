@@ -19,8 +19,9 @@ namespace PsychoFlash.SelfTest
     internal sealed class SimulatedPcm : IPassThruDevice
     {
         public const int ImageSize = 0x100000;
-        private const uint RequestId = 0x7E0;
-        private const uint ResponseId = 0x7E8;
+        // static readonly, not const: (byte)0x7E8 is a compile-time error on a constant.
+        private static readonly uint RequestId = 0x7E0;
+        private static readonly uint ResponseId = 0x7E8;
 
         private readonly Queue<byte[]> _responses = new Queue<byte[]>();
         private readonly uint _seed = 0x123456;
