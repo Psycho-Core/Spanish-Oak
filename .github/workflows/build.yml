@@ -1,0 +1,157 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Show SDK
+        run: dotnet --info
+
+      - name: Restore
+        run: dotnet restore PsychoFlash.sln
+
+      - name: Build (Release, net48 + net8.0-windows)
+        run: dotnet build PsychoFlash.sln -c Release --no-restore
+
+      - name: Self tests (seed/key vectors, profile contract, framing)
+        shell: pwsh
+        run: |
+          dotnet run --project tests/PsychoFlash.SelfTest -c Release --no-build 2>&1 |
+            Tee-Object -FilePath selftest.log
+          $code = $LASTEXITCODE
+          Get-Content selftest.log | Write-Host
+          if ($code -ne 0) {
+            $hits = Select-String -Path selftest.log -Pattern 'FAIL|Unhandled|Exception|error' |
+              Select-Object -First 20
+            foreach ($hit in $hits) { Write-Host ("::error::" + $hit.Line) }
+            if (-not $hits) { Write-Host "::error::self test exited with code $code (no FAIL/Exception line found)" }
+            exit $code
+          }
+
+      - name: Python tools
+        shell: pwsh
+        run: |
+          python -m py_compile tools/pyinstaller_extract.py tools/recover_il.py tools/seedkey_reference.py
+          python tools/seedkey_reference.py --self-test
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: PsychoFlash-windows
+          if-no-files-found: error
+          path: |
+            src/PsychoFlash.App/bin/Release/net8.0-windows/**
+            src/PsychoFlash.App/bin/Release/net48/**
+            src/PsychoFlash.Cli/bin/Release/net8.0/**
+
+  core:
+    name: Core portability (Linux, no WinForms)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build PsychoFlash.Core
+        run: dotnet build src/PsychoFlash.Core/PsychoFlash.Core.csproj -c Release
+
+      - name: Self test runner on Linux
+        run: |
+          set +e
+          dotnet run --project tests/PsychoFlash.SelfTest -c Release 2>&1 | tee selftest.log
+          code=${PIPESTATUS[0]}
+          echo "self test exit code: $code"
+          if [ "$code" -ne 0 ]; then
+            hits=$(grep -E 'FAIL|Unhandled|Exception|error' selftest.log | head -20)
+            if [ -n "$hits" ]; then
+              printf '%s\n' "$hits" | while IFS= read -r line; do echo "::error::$line"; done
+            else
+              echo "::error::self test exited with code $code (no FAIL/Exception line found)"
+            fi
+            exit "$code"
+          fi
+
+  release:
+    name: Release binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, core]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish standalone single file (no runtime install needed)
+        run: >
+          dotnet publish src/PsychoFlash.App/PsychoFlash.App.csproj -c Release -f net8.0-windows
+          -r win-x64 --self-contained true -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+          -o publish/standalone
+
+      - name: Build framework dependent builds
+        run: |
+          dotnet build src/PsychoFlash.App/PsychoFlash.App.csproj -c Release -f net48
+          dotnet build src/PsychoFlash.App/PsychoFlash.App.csproj -c Release -f net8.0-windows
+          dotnet build src/PsychoFlash.Cli/PsychoFlash.Cli.csproj -c Release
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item publish/standalone/PsychoFlash.exe dist/PsychoFlash-standalone.exe
+          # Only the top level files belong in the framework dependent zips; the self contained
+          # publish also leaves a win-x64 folder under bin and that must not be shipped twice.
+          function Zip-Root([string]$dir, [string]$zip) {
+            $files = Get-ChildItem -Path $dir -File
+            if (-not $files) { throw "no files in $dir" }
+            Compress-Archive -Path $files.FullName -DestinationPath $zip -Force
+            "{0}: {1} files" -f (Split-Path $zip -Leaf), $files.Count
+          }
+          Zip-Root "src/PsychoFlash.App/bin/Release/net48" "dist/PsychoFlash-net48.zip"
+          Zip-Root "src/PsychoFlash.App/bin/Release/net8.0-windows" "dist/PsychoFlash-net8.0-windows.zip"
+          Zip-Root "src/PsychoFlash.Cli/bin/Release/net8.0" "dist/psychoflash-cli-net8.0.zip"
+          Get-ChildItem dist | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+          if ((Get-Item dist/PsychoFlash-net8.0-windows.zip).Length -gt 20MB) {
+            throw "framework dependent zip is too big - the self contained publish leaked into it"
+          }
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "PsychoFlash $tag" --notes-file docs/RELEASE_NOTES.md
+          }
+          gh release upload $tag dist/* --clobber

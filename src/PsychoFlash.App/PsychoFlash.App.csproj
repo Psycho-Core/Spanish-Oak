@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>PsychoFlash</AssemblyName>
+    <RootNamespace>PsychoFlash.App</RootNamespace>
+    <Nullable>disable</Nullable>
+    <UseWindowsForms Condition="'$(TargetFramework)' == 'net8.0-windows'">true</UseWindowsForms>
+    <Company>Psycho</Company>
+    <Product>PsychoFlash</Product>
+    <AssemblyTitle>PsychoFlash - Ford EEC-VI / Spanish Oak PCM Flasher</AssemblyTitle>
+    <Description>Read, write and erase the flash memory of Ford EEC-VI (Spanish Oak 1024k) PCMs over SAE J2534.</Description>
+    <Version>1.6.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PsychoFlash.Core\PsychoFlash.Core.csproj" />
+  </ItemGroup>
+
+</Project>

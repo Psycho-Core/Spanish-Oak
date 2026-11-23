@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>PsychoFlash.Core</AssemblyName>
+    <RootNamespace>PsychoFlash.Core</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Version>1.6.0</Version>
+    <Description>PsychoFlash core: SAE J2534 interop, ISO-TP transport and Ford EEC-VI (Spanish Oak) flashing protocol.</Description>
+  </PropertyGroup>
+
+</Project>
