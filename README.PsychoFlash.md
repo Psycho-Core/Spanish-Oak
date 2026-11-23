@@ -30,6 +30,20 @@ It was written after reverse engineering the original tool; the full write-up is
   discovered from `HKLM\SOFTWARE\PassThruSupport.04.04` or passed explicitly.
 * No licence server, no dongle, no telemetry.
 
+## Download a build
+
+Releases are built by GitHub Actions on `windows-latest` (net48, net8.0-windows and the CLI) and
+verified by the self test on both Windows and Linux:
+
+<https://github.com/Psycho-Core/Spanish-Oak/releases>
+
+* `PsychoFlash-standalone.exe` - single self-contained file, no .NET install needed (easiest).
+* `PsychoFlash-net48.zip` - ~300 KB, needs .NET Framework 4.8 (already on Windows 10/11).
+* `psychoflash-cli-net8.0.zip` - the console front end.
+
+Build status: `.github/workflows/build.yml` runs on every push; a failing self-test line shows up
+as a check annotation on the run.
+
 ## Requirements
 
 * Windows (J2534 drivers are Windows only).

@@ -1,0 +1,68 @@
+# PsychoFlash
+
+A ground-up reimplementation of the *Spanish Oak Flash Tool* for Ford EEC-VI
+**Spanish Oak 1024k** PCMs: BF, FG, FGII and FGX Falcon (Barra I6), plus the Black Oak dual-bank
+layout. Talks to the PCM over any SAE J2534 pass-through interface (VCM II, OBDX Pro, Mongoose,
+Tactrix Openport, etc.).
+
+## What's in this release
+
+| File | Use it when |
+| --- | --- |
+| `PsychoFlash-standalone.exe` | Easiest. Single file, self contained - no .NET install required. |
+| `PsychoFlash-net48.zip` | Small (~300 KB). Needs .NET Framework 4.8, which ships with Windows 10/11. |
+| `PsychoFlash-net8.0-windows.zip` | Framework dependent build for .NET 8 desktop. |
+| `psychoflash-cli-net8.0.zip` | Command line version for scripting and batch work. |
+
+## Requirements
+
+* Windows 10/11 (x64).
+* A J2534 device with the vendor driver installed (`InstalledJ2534DLLs` in the registry).
+* A **stable power supply** on the car battery, and FEPS (18 V programming voltage) support on
+  the interface. The PCM is bricked if power drops mid-erase.
+
+## Using the GUI (PsychoFlash.exe)
+
+1. Pick the J2534 interface from the drop-down (the tool lists what the vendor driver registered).
+2. Pick the profile - **Falcon Spanish Oak 1024k (BF/FG/FGII/FGX)** for a Barra.
+3. `Read PCM` writes a 1 MB image you can back up.
+4. `Write PCM` erases `0x010000-0x0FFFFF` and flashes the calibration area; the boot block is
+   never touched.
+5. `Verify PCM` reads the PCM back and compares it with the open file.
+
+## Using the CLI
+
+```
+psychoflash interfaces
+psychoflash info --in falcon-stock.bin
+psychoflash read --out backup.bin --yes
+psychoflash write --in tuned.bin --verify --yes
+psychoflash erase --yes
+psychoflash seed --seed AABBCC
+```
+
+## Read this before the first flash
+
+* This code has **never been run against a real PCM**. It was written from a protocol
+  reconstruction of the original tool and validated with contract tests, but the first session on
+  a car should be a **read only**. See `docs/AUDIT.md` for the full audit, the five known gaps
+  and a first-session checklist.
+* Flashing **does not fix Ford checksums**. If the calibration changed, apply the checksum in your
+  tuning software first.
+* Keep the original 1 MB read. That file is your recovery path.
+
+## Verify what you downloaded
+
+Every release is built by GitHub Actions from the tagged commit; the workflow is in
+`.github/workflows/build.yml`. Build and test locally with `build.cmd` or:
+
+```
+dotnet build PsychoFlash.sln -c Release
+dotnet run --project tests/PsychoFlash.SelfTest -c Release
+```
+
+## License
+
+The PsychoFlash sources are MIT (`LICENSE-PsychoFlash`). The original
+`Spanish Oak Flash Tool.exe` is **not** included and remains the property of its author; see
+`README.md`.
