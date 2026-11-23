@@ -1,0 +1,22 @@
+## Build output
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+
+## Reversing / extraction scratch (never commit extracted binaries)
+re/
+extracted/
+*.extracted/
+__pycache__/
+*.pyc
+.venv/
+
+## Flash images and logs
+*.bin
+!docs/examples/*.bin
+psychoflash-log-*.txt
