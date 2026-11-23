@@ -196,9 +196,13 @@ namespace PsychoFlash.Core.Protocol
                 silentReads = 0;
 
                 byte[] data = StripCanId(raw);
-                if (data.Length < 2) continue;
 
-                if (data[0] == 0x7F)
+                // A positive answer to 0x36, 0x37 or 0xB2 is a single byte (0x76, 0x77, 0xF2),
+                // so a one byte payload is a complete answer, not padding. Only a frame that
+                // carried no payload at all is ignored.
+                if (data.Length < 1) continue;
+
+                if (data[0] == 0x7F && data.Length >= 3)
                 {
                     byte service = data.Length > 1 ? data[1] : (byte)0;
                     byte code = data.Length > 2 ? data[2] : (byte)0;

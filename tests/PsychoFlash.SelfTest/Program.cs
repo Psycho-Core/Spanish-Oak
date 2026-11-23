@@ -27,6 +27,7 @@ namespace PsychoFlash.SelfTest
             TestAlgorithmBag();
             TestFrameConstruction();
             TestReadResponseFraming();
+            TestSingleByteAnswers();
             TestImageTools();
             TestImageDiffAndChecksums();
             TestChecksumDiscovery();
@@ -276,6 +277,55 @@ namespace PsychoFlash.SelfTest
             byte[] full = FordPcmClient.ExtractReadData(block, 0x400);
             Check(full.Length == 0x400 && full[0] == 0x01 && full[0x3FF] == (byte)(0x400 & 0xFF),
                   "0x400 byte block loses exactly one prefix byte");
+        }
+
+        /// <summary>
+        /// Spanish Oak answers 0x36, 0x37 and 0xB2 with a single byte (0x76, 0x77, 0xF2). A client
+        /// that throws away one byte payloads as padding reads a perfectly good block
+        /// acknowledgement as silence, and the flash dies on the first block - which is exactly what
+        /// the simulated PCM caught. This pins the smallest possible answer down.
+        /// </summary>
+        private static void TestSingleByteAnswers()
+        {
+            Console.WriteLine("Single byte positive answers");
+            using (SingleByteDevice device = new SingleByteDevice())
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                Check(client.EraseFlash(), "0xF2 alone is a complete erase answer");
+                Check(client.TransferData(new byte[4]), "0x76 alone acknowledges a data block");
+                Check(client.TransferExit(), "0x77 alone is a complete transfer exit answer");
+            }
+        }
+
+        /// <summary>
+        /// An interface that answers every request with the positive response byte and nothing else -
+        /// the shortest legal answer on this protocol.
+        /// </summary>
+        private sealed class SingleByteDevice : IPassThruDevice
+        {
+            private readonly Queue<byte[]> _answers = new Queue<byte[]>();
+
+            public string FirmwareVersion { get { return "one-byte"; } }
+            public string DllVersion { get { return "one-byte"; } }
+            public string ApiVersion { get { return "04.04"; } }
+
+            public uint ReadBatteryVoltage() { return 12000; }
+            public void SetProgrammingVoltage(uint pinNumber, uint voltage) { }
+            public void ClearBuffers() { _answers.Clear(); }
+
+            public void WriteMessage(byte[] canIdAndPayload, TxFlags flags, uint timeoutMs)
+            {
+                byte service = canIdAndPayload[4];
+                _answers.Enqueue(new byte[] { 0x00, 0x00, 0x07, 0xE8, (byte)(service + 0x40) });
+            }
+
+            public byte[] ReadMessage(uint timeoutMs)
+            {
+                if (_answers.Count == 0) throw new TimeoutException("nothing queued");
+                return _answers.Dequeue();
+            }
+
+            public void Dispose() { }
         }
 
         private static void TestImageTools()

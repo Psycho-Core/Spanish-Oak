@@ -98,6 +98,22 @@ and the failure would have looked like a wiring fault.
 Found by the simulated PCM in the self test, which asserts the voltage the interface is asked for.
 Fixed by converting to millivolts in the device layer and printing both units in the error message.
 
+### 8. Single byte answers were thrown away as padding (critical, no flash possible)
+
+`WaitForResponse` skipped any message whose payload was shorter than two bytes, on the assumption
+that a one byte frame is filler. On this protocol the positive answers to `0x36`, `0x37` and `0xB2`
+are exactly one byte (`0x76`, `0x77`, `0xF2`), so every block acknowledgement was discarded, the
+client read silence for 60 rounds and reported "No response from the PCM for service 0x36".
+
+This is the defect that ended the run above it: defect 1 was fixed so that the *first complete
+message* is returned, but the length filter in front of it still ate the acknowledgement. On a car
+the erase would have looked silent (tolerated, since some PCMs do stop answering during an erase)
+and the write would have died on block 1 of 960 with a message blaming ignition, FEPS and wiring.
+
+Found by the simulated PCM, which answers like the real thing: only a frame with no payload at all
+is ignored now, and a negative response is only read as one when its three bytes are present.
+Pinned by a self-test case that answers every request with the response byte alone.
+
 ## Contract tests added
 
 `tests/PsychoFlash.SelfTest` now fails the build if any BF Barra constant drifts:
