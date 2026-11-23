@@ -380,6 +380,13 @@ namespace PsychoFlash.Core.Flashing
                     sb.Length = 0;
                 }
             }
+
+            // A run that reaches the end of the image is never terminated by a non printable byte,
+            // so flush it here. Without this the last string in a calibration is always lost.
+            if (found.Count < limit && sb.Length >= minimumLength)
+            {
+                found.Add("0x" + (image.Length - sb.Length).ToString("X6") + ": " + sb);
+            }
             return found;
         }
 

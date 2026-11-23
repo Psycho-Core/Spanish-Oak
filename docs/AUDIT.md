@@ -10,9 +10,15 @@ Method: line-by-line review of `PsychoFlash.Core` against the recovered referenc
 ## Verdict
 
 **Protocol coverage: complete for read / erase / write / verify on a BF Barra PCM.**
-Four defects were found in review and fixed - one of them would have made a write take about
-30 minutes instead of about 35 seconds. Five capability gaps remain and are listed at the end;
-none of them blocks a stock read or a tuned-image flash.
+Five defects were found and fixed - one of them would have made a write take about
+30 minutes instead of about 35 seconds, and the fifth was caught by the first CI run on a real
+.NET toolchain. Five capability gaps remain and are listed at the end; none of them blocks a
+stock read or a tuned-image flash.
+
+Continuous integration: `.github/workflows/build.yml` compiles the solution on
+`windows-latest` (net48 + net8.0-windows + net8.0 CLI) and builds `PsychoFlash.Core` on
+`ubuntu-latest`, then runs this self test on both. First run: both compilations clean, self test
+failed on defect 5 below.
 
 | Area | Reference tool | PsychoFlash | Status |
 | --- | --- | --- | --- |
@@ -57,6 +63,16 @@ refused. Fixed: it now enters programming mode and always leaves it in a `finall
 ### 4. The "Measure" button stayed disabled after an operation (minor)
 
 `SetBusy(false, ...)` did not re-enable the battery button. Fixed.
+
+### 5. `ImageTools.FindPrintableStrings` dropped the last string in an image (minor)
+
+A printable run is only emitted when a non-printable byte closes it, so a run that reaches the
+end of the buffer was never added - the strategy/calibration identifier printed by `psychoflash
+info` was missing whenever it sat at the end of a block. Caught by the first CI run, because the
+self test asserts a run that ends at the end of the image.
+
+Fixed: the trailing run is flushed after the loop (respecting the string limit). The test now
+covers a terminated run, a trailing run and the limit.
 
 ## Contract tests added
 

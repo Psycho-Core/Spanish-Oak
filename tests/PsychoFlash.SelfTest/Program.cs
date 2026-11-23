@@ -186,7 +186,16 @@ namespace PsychoFlash.SelfTest
 
             byte[] text = System.Text.Encoding.ASCII.GetBytes("....BF12345678901234....");
             IList<string> strings = ImageTools.FindPrintableStrings(text, 4, 10);
-            Check(strings.Count == 1 && strings[0].Contains("BF12345678901234"), "printable string extraction");
+            Check(strings.Count == 1 && strings[0].Contains("BF12345678901234"), "printable string extraction (run at end of image)");
+
+            // A run that ends on a non printable byte, plus a second run that runs to the very end.
+            byte[] mixed = new byte[] { 0x41, 0x41, 0x41, 0x41, 0x00, 0x42, 0x42, 0x42, 0x42, 0x42 };
+            IList<string> runs = ImageTools.FindPrintableStrings(mixed, 4, 10);
+            Check(runs.Count == 2, "both printable runs are found (" + runs.Count + ")");
+            Check(runs.Count == 2 && runs[0].Contains("AAAA") && runs[1].Contains("BBBBB"), "run contents and order");
+
+            IList<string> limited = ImageTools.FindPrintableStrings(mixed, 4, 1);
+            Check(limited.Count == 1, "string limit is honoured");
         }
 
         private static void TestNegativeResponseCodes()

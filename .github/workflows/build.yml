@@ -33,7 +33,19 @@ jobs:
         run: dotnet build PsychoFlash.sln -c Release --no-restore
 
       - name: Self tests (seed/key vectors, profile contract, framing)
-        run: dotnet run --project tests/PsychoFlash.SelfTest -c Release --no-build
+        shell: pwsh
+        run: |
+          dotnet run --project tests/PsychoFlash.SelfTest -c Release --no-build 2>&1 |
+            Tee-Object -FilePath selftest.log
+          $code = $LASTEXITCODE
+          Get-Content selftest.log | Write-Host
+          if ($code -ne 0) {
+            $hits = Select-String -Path selftest.log -Pattern 'FAIL|Unhandled|Exception|error' |
+              Select-Object -First 20
+            foreach ($hit in $hits) { Write-Host ("::error::" + $hit.Line) }
+            if (-not $hits) { Write-Host "::error::self test exited with code $code (no FAIL/Exception line found)" }
+            exit $code
+          }
 
       - name: Python tools
         shell: pwsh
@@ -67,4 +79,17 @@ jobs:
         run: dotnet build src/PsychoFlash.Core/PsychoFlash.Core.csproj -c Release
 
       - name: Self test runner on Linux
-        run: dotnet run --project tests/PsychoFlash.SelfTest -c Release
+        run: |
+          set +e
+          dotnet run --project tests/PsychoFlash.SelfTest -c Release 2>&1 | tee selftest.log
+          code=${PIPESTATUS[0]}
+          echo "self test exit code: $code"
+          if [ "$code" -ne 0 ]; then
+            hits=$(grep -E 'FAIL|Unhandled|Exception|error' selftest.log | head -20)
+            if [ -n "$hits" ]; then
+              printf '%s\n' "$hits" | while IFS= read -r line; do echo "::error::$line"; done
+            else
+              echo "::error::self test exited with code $code (no FAIL/Exception line found)"
+            fi
+            exit "$code"
+          fi
