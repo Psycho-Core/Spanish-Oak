@@ -114,7 +114,7 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  interfaces                 List installed J2534 interfaces");
             Console.WriteLine("  info                       Show interface, battery voltage and PCM identification");
             Console.WriteLine("  read  --out <file.bin>     Read the flash and save it");
-            Console.WriteLine("  write --in  <file.bin>     Erase and program a flash image");
+            Console.WriteLine("  write --in  <file.bin>     Erase and program a flash image (--verify, --force)");
             Console.WriteLine("  verify --in <file.bin>     Compare the PCM contents against a file");
             Console.WriteLine("  erase                      Erase the flash (recovery)");
             Console.WriteLine("  dtcs [--clear]             Read stored trouble codes (0x19); --clear wipes them (0x14)");
@@ -616,8 +616,7 @@ namespace PsychoFlash.Cli
             int shown = 0;
             foreach (ImageDifference region in regions)
             {
-                bool writable = region.End > profile.WriteSegments[0].Address &&
-                                region.Offset < profile.WriteSegments[0].End;
+                bool writable = profile.IsImageOffsetWritten(region.Offset, region.Length);
                 string label = writable ? "in write window" : "OUTSIDE write window (will not be flashed)";
                 Console.WriteLine("  " + region + "   " + label);
                 if (++shown >= 40)
@@ -827,6 +826,20 @@ namespace PsychoFlash.Cli
                 return 2;
             }
 
+            // A blank megabyte is what a failed read or an empty template looks like. Writing one
+            // erases a working PCM and leaves it unable to start, so it takes --force to do it.
+            string problem = FlashService.DescribeWriteProblem(image);
+            if (problem != null)
+            {
+                if (!parsed.ContainsKey("force"))
+                {
+                    Console.Error.WriteLine(problem);
+                    Console.Error.WriteLine("Nothing was sent to the PCM. Add --force if you really mean to write it.");
+                    return 2;
+                }
+                Console.WriteLine("WARNING: " + problem + "  (--force given, continuing)");
+            }
+
             Console.WriteLine("Profile : " + profile.Name);
             Console.WriteLine("Image   : " + Path.GetFullPath(input));
             Console.WriteLine("SHA-256 : " + FlashService.Hash(image));
@@ -882,7 +895,20 @@ namespace PsychoFlash.Cli
                 Console.Error.WriteLine("--in <file.bin> is required.");
                 return 2;
             }
+            if (!File.Exists(input))
+            {
+                Console.Error.WriteLine("File not found: " + input);
+                return 2;
+            }
             byte[] image = File.ReadAllBytes(input);
+            PcmProfile profile = ResolveProfile();
+            if (image.Length != profile.ImageSize)
+            {
+                Console.Error.WriteLine("Image is " + image.Length + " bytes; " + profile.Name + " needs " +
+                                        profile.ImageSize + " bytes. Nothing was sent to the PCM.");
+                return 2;
+            }
+
             using (CancellationTokenSource cts = CreateCancellation())
             using (FlashSession session = CreateSession(true))
             {

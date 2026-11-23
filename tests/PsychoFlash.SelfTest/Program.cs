@@ -28,6 +28,9 @@ namespace PsychoFlash.SelfTest
             TestFrameConstruction();
             TestReadResponseFraming();
             TestSingleByteAnswers();
+            TestShortSeedAnswer();
+            TestWriteGuards();
+            TestWriteWindowMapping();
             TestImageTools();
             TestImageDiffAndChecksums();
             TestChecksumDiscovery();
@@ -288,7 +291,8 @@ namespace PsychoFlash.SelfTest
         private static void TestSingleByteAnswers()
         {
             Console.WriteLine("Single byte positive answers");
-            using (SingleByteDevice device = new SingleByteDevice())
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { (byte)(service + 0x40) }; }))
             {
                 FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
                 Check(client.EraseFlash(), "0xF2 alone is a complete erase answer");
@@ -301,15 +305,120 @@ namespace PsychoFlash.SelfTest
         }
 
         /// <summary>
-        /// An interface that answers every request with the positive response byte and nothing else -
-        /// the shortest legal answer on this protocol.
+        /// An answer shorter than the seed the algorithm expects has to be reported. Reading past
+        /// the end of the buffer threw IndexOutOfRangeException from inside the unlock, which told
+        /// the operator nothing about what the PCM had actually said.
         /// </summary>
-        private sealed class SingleByteDevice : IPassThruDevice
+        private static void TestShortSeedAnswer()
+        {
+            Console.WriteLine("Short 0x27 seed answer");
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { 0x67, 0x01, 0xAA }; }))
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                bool reported = false;
+                try
+                {
+                    client.SecurityAccess(SeedKeyAlgorithms.FordSpanishOak);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    reported = ex.Message.IndexOf("seed", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("    wrong exception type: " + ex.GetType().Name + ": " + ex.Message);
+                }
+                Check(reported, "a short seed answer is refused with a readable message, not an index error");
+            }
+        }
+
+        /// <summary>
+        /// The two gates that stand between a mistake and an erased PCM: a blank image and an image
+        /// of the wrong size. Both are cheap to test here and expensive to get wrong in a driveway.
+        /// </summary>
+        private static void TestWriteGuards()
+        {
+            Console.WriteLine("Write guards");
+
+            Check(FlashService.DescribeWriteProblem(null) != null, "no image is refused");
+            Check(FlashService.DescribeWriteProblem(new byte[0]) != null, "an empty file is refused");
+
+            byte[] erased = new byte[0x100000];
+            for (int i = 0; i < erased.Length; i++) erased[i] = 0xFF;
+            Check(FlashService.DescribeWriteProblem(erased) != null, "an all-0xFF image is refused");
+            Check(FlashService.DescribeWriteProblem(new byte[0x100000]) != null, "an all-0x00 image is refused");
+
+            byte[] populated = new byte[0x100000];
+            for (int i = 0; i < populated.Length; i++) populated[i] = (byte)(i * 7);
+            Check(FlashService.DescribeWriteProblem(populated) == null, "a populated image is accepted");
+
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { (byte)(service + 0x40) }; }))
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                FlashService service = new FlashService(client, null);
+                bool refused = false;
+                try
+                {
+                    service.VerifyImage(new byte[0x800], null, System.Threading.CancellationToken.None);
+                }
+                catch (ArgumentException)
+                {
+                    refused = true;
+                }
+                Check(refused, "verify refuses an image of the wrong size before touching the PCM");
+
+                bool writeRefused = false;
+                try
+                {
+                    service.WriteImage(new byte[0x800], null, System.Threading.CancellationToken.None);
+                }
+                catch (ArgumentException)
+                {
+                    writeRefused = true;
+                }
+                Check(writeRefused, "write refuses an image of the wrong size before touching the PCM");
+            }
+        }
+
+        /// <summary>
+        /// Which parts of the image a write really programs. `diff` uses this to say whether a
+        /// change would be flashed, and on the dual bank profile only the first window used to be
+        /// considered - every change in the second bank was labelled "will not be flashed".
+        /// </summary>
+        private static void TestWriteWindowMapping()
+        {
+            Console.WriteLine("Write window mapping");
+            PcmProfile falcon = PcmProfile.SpanishOakFalcon();
+            Check(!falcon.IsImageOffsetWritten(0x000000, 0x1000), "boot block is outside the write window (Falcon)");
+            Check(falcon.IsImageOffsetWritten(0x010000, 1), "first calibration byte is written (Falcon)");
+            Check(falcon.IsImageOffsetWritten(0x0FFFFF, 1), "last byte of the image is written (Falcon)");
+
+            PcmProfile dual = PcmProfile.BlackOakDual();
+            Check(!dual.IsImageOffsetWritten(0x000000, 0x1000), "boot block is outside the write window (Black Oak)");
+            Check(dual.IsImageOffsetWritten(0x6FFFF, 1), "end of the first bank is written (Black Oak)");
+            Check(dual.IsImageOffsetWritten(0x70000, 1), "second bank at image 0x70000 is written (Black Oak)");
+        }
+
+        /// <summary>
+        /// An interface that answers whatever the test scripts for it - usually the shortest legal
+        /// answer, the positive response byte alone - so response matching can be exercised without
+        /// a PCM or a J2534 DLL.
+        /// </summary>
+        private sealed class ScriptedDevice : IPassThruDevice
         {
             private readonly Queue<byte[]> _answers = new Queue<byte[]>();
+            private readonly Func<byte, byte[]> _responder;
 
-            public string FirmwareVersion { get { return "one-byte"; } }
-            public string DllVersion { get { return "one-byte"; } }
+            public ScriptedDevice(Func<byte, byte[]> responder)
+            {
+                if (responder == null) throw new ArgumentNullException("responder");
+                _responder = responder;
+            }
+
+            public string FirmwareVersion { get { return "scripted"; } }
+            public string DllVersion { get { return "scripted"; } }
             public string ApiVersion { get { return "04.04"; } }
 
             public uint ReadBatteryVoltage() { return 12000; }
@@ -319,7 +428,15 @@ namespace PsychoFlash.SelfTest
             public void WriteMessage(byte[] canIdAndPayload, TxFlags flags, uint timeoutMs)
             {
                 byte service = canIdAndPayload[4];
-                _answers.Enqueue(new byte[] { 0x00, 0x00, 0x07, 0xE8, (byte)(service + 0x40) });
+                byte[] payload = _responder(service);
+                if (payload == null || payload.Length == 0) return;
+                byte[] frame = new byte[payload.Length + 4];
+                frame[0] = 0x00;
+                frame[1] = 0x00;
+                frame[2] = 0x07;
+                frame[3] = 0xE8;
+                Array.Copy(payload, 0, frame, 4, payload.Length);
+                _answers.Enqueue(frame);
             }
 
             public byte[] ReadMessage(uint timeoutMs)
@@ -614,7 +731,7 @@ namespace PsychoFlash.SelfTest
 
             // --- and it refuses politely when the key is wrong ---
             SimulatedPcm strict = new SimulatedPcm();
-            strict.SetProgrammingVoltage(profile.ProgrammingPin, profile.ProgrammingVoltage);
+            strict.SetProgrammingVoltage(profile.ProgrammingPin, (uint)profile.ProgrammingVoltage * 1000);
             FordPcmClient wrong = new FordPcmClient(strict, profile, delegate { });
             bool refused = false;
             try

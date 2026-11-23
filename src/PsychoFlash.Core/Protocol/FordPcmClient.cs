@@ -294,6 +294,15 @@ namespace PsychoFlash.Core.Protocol
             byte[] requestSeed = new byte[] { ServiceSecurityAccess, 0x01 };
             byte[] seedResponse = Request(requestSeed, 2 + algorithm.SeedLength);
             if (seedResponse[0] != 0x67) return false;
+            if (seedResponse.Length < 2 + algorithm.SeedLength)
+            {
+                // Reading past the end here used to throw IndexOutOfRangeException from inside the
+                // unlock, which told the operator nothing at all.
+                throw new InvalidOperationException("The 0x27 seed answer carried " + seedResponse.Length +
+                    " byte(s) [" + BytesToHex(seedResponse) + "] but this algorithm needs " +
+                    (2 + algorithm.SeedLength) + " for a " + algorithm.SeedLength +
+                    "-byte seed. No key was sent, so no security attempt was used.");
+            }
 
             uint seed = 0;
             for (int i = 0; i < algorithm.SeedLength; i++)

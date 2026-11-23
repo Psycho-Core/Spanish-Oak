@@ -324,6 +324,17 @@ namespace PsychoFlash.Core.J2534
                 for (int i = 0; i < size; i++) Marshal.WriteByte(ptr, i, 0);
                 uint count = 1;
                 J2534Err err = _lib.ReadMsgs(_channelId, ptr, ref count, timeoutMs);
+
+                // "Nothing arrived" is not an error, it is the normal way for a read to end. The
+                // interface contract promises a TimeoutException for it, so drivers that report
+                // ERR_TIMEOUT / ERR_BUFFER_EMPTY instead of returning zero messages are translated
+                // here rather than leaking a J2534Exception into the protocol code.
+                if (err == J2534Err.ERR_TIMEOUT || err == J2534Err.ERR_BUFFER_EMPTY ||
+                    err == J2534Err.ERR_ISO15765_RX_TIMEOUT || err == J2534Err.ERR_ISO15765_TX_FC_TIMEOUT)
+                {
+                    throw new TimeoutException("No message from the interface within " + timeoutMs +
+                                               " ms (" + err + ").");
+                }
                 if (err != J2534Err.STATUS_NOERROR) throw new J2534Exception("PassThruReadMsgs", err);
                 if (count == 0) return new byte[0];
                 PassThruMsg msg = (PassThruMsg)Marshal.PtrToStructure(ptr, typeof(PassThruMsg));
