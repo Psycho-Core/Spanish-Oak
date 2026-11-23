@@ -78,6 +78,14 @@ namespace PsychoFlash.Cli
                     case "identify":
                     case "id":
                         return Identify();
+                    case "live":
+                    case "data":
+                        return Live(parsed);
+                    case "diff":
+                        return Diff(parsed);
+                    case "checksums":
+                    case "checksum":
+                        return Checksums(parsed);
                     default:
                         Console.Error.WriteLine("Unknown command '" + command + "'.");
                         PrintUsage();
@@ -117,6 +125,9 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  diagnose                   Read-only health check: interface, battery, seed, VIN, codes");
             Console.WriteLine("  identify                   Read the PCM part number / hardware / software identifiers (0x22)");
             Console.WriteLine("  info --in <file.bin>       Inspect a saved image offline (size, hash, strings)");
+            Console.WriteLine("  live [--pid 0C,05,11]      Stream live sensor data (OBD-II mode 01), Ctrl+C to stop");
+            Console.WriteLine("  diff --a <file> --b <file> Show which bytes differ between two images");
+            Console.WriteLine("  checksums --in <file>      Print checksum candidates for an image");
             Console.WriteLine();
             Console.WriteLine("Options");
             Console.WriteLine("  --dll <path>               J2534 driver DLL (default: first interface in the registry)");
@@ -125,6 +136,10 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  --keybag <file>            Try each constant set in the file until the PCM unlocks");
             Console.WriteLine("  --feps-pin <n>             Programming voltage pin (default 0x80; use 13 for OBD pin 13)");
             Console.WriteLine("  --feps-voltage <volts>     Programming voltage (default 18)");
+            Console.WriteLine("  --pid <list>               Live data PIDs, hex, e.g. 0C,05,11 (default 0C,05,11,0D,10,0F,42)");
+            Console.WriteLine("  --interval <ms>            Live data poll interval (default 500)");
+            Console.WriteLine("  --count <n>                Stop after n samples (default: run until Ctrl+C)");
+            Console.WriteLine("  --csv                      Live data as CSV");
             Console.WriteLine("  --verify                   Verify after writing");
             Console.WriteLine("  --yes                      Do not ask for confirmation");
             Console.WriteLine();
@@ -136,6 +151,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  psychoflash dtcs");
             Console.WriteLine("  psychoflash dtcs --clear");
             Console.WriteLine("  psychoflash identify");
+            Console.WriteLine("  psychoflash live --pid 0C --interval 250");
+            Console.WriteLine("  psychoflash diff --a stock.bin --b tuned.bin");
             Console.WriteLine("  psychoflash info --in barra-stock.bin");
             Console.WriteLine("  psychoflash diagnose");
             Console.WriteLine("  psychoflash unlock --seed-only");
@@ -166,7 +183,7 @@ namespace PsychoFlash.Cli
         private static bool NeedsValue(string key)
         {
             string[] withValue = { "dll", "device", "profile", "in", "out", "seed", "pin", "voltage",
-                                   "keybag", "feps-pin", "feps-voltage", "file" };
+                                   "keybag", "feps-pin", "feps-voltage", "file", "pid", "interval", "count", "a", "b" };
             foreach (string s in withValue) if (string.Equals(s, key, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }
@@ -490,6 +507,167 @@ namespace PsychoFlash.Cli
                 ? "Looks like a real Spanish Oak image."
                 : "DOES NOT look like a usable image - re-read the PCM and compare the size and strings.");
             return plausible ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Live data over OBD-II mode 01. Standard PIDs, so nothing has to be reverse engineered
+        /// for the conversion basics: rpm while cranking, coolant, throttle, MAF, battery.
+        /// </summary>
+        private static int Live(Dictionary<string, string> parsed)
+        {
+            byte[] pids;
+            string list;
+            if (parsed.TryGetValue("pid", out list)) pids = ObdPids.ParseList(list);
+            else pids = ObdPids.DefaultSet();
+            if (pids.Length == 0)
+            {
+                Console.Error.WriteLine("No PIDs to read.");
+                return 2;
+            }
+
+            int interval = parsed.ContainsKey("interval") ? ParseNumber(parsed["interval"], "--interval") : 500;
+            if (interval < 50) interval = 50;
+            int count = parsed.ContainsKey("count") ? ParseNumber(parsed["count"], "--count") : 0;
+            bool csv = parsed.ContainsKey("csv");
+
+            using (FlashSession session = CreateSession(true))
+            {
+                if (session.Client == null) { Console.Error.WriteLine("Not connected."); return 1; }
+
+                if (csv)
+                {
+                    Console.Write("time");
+                    foreach (byte pid in pids) Console.Write("," + ObdPids.Describe(pid));
+                    Console.WriteLine();
+                }
+                else
+                {
+                    Console.WriteLine("Polling " + pids.Length + " PID(s) every " + interval + " ms. Ctrl+C to stop.");
+                    foreach (byte pid in pids)
+                    {
+                        Console.WriteLine("  0x" + pid.ToString("X2") + "  " + ObdPids.Describe(pid));
+                    }
+                    Console.WriteLine();
+                }
+
+                int samples = 0;
+                DateTime start = DateTime.Now;
+                while (count <= 0 || samples < count)
+                {
+                    DateTime now = DateTime.Now;
+                    if (csv) Console.Write(now.ToString("HH:mm:ss.fff"));
+                    else Console.Write(now.ToString("HH:mm:ss.fff") + "  ");
+
+                    for (int i = 0; i < pids.Length; i++)
+                    {
+                        byte[] data = session.Client.ReadPid(pids[i]);
+                        string text = data == null ? "n/a" : ObdPids.Format(pids[i], data);
+                        if (csv) Console.Write("," + text);
+                        else Console.Write((i > 0 ? "   " : "") + text);
+                    }
+                    Console.WriteLine();
+                    samples++;
+
+                    int elapsed = (int)(DateTime.Now - now).TotalMilliseconds;
+                    if (interval > elapsed) System.Threading.Thread.Sleep(interval - elapsed);
+                }
+
+                Console.WriteLine();
+                Console.WriteLine(samples + " sample(s) in " +
+                                  (DateTime.Now - start).TotalSeconds.ToString("0.0") + " s.");
+            }
+            return 0;
+        }
+
+        /// <summary>Which bytes differ between two images - the starting point for understanding a tune.</summary>
+        private static int Diff(Dictionary<string, string> parsed)
+        {
+            string pathA, pathB;
+            if (!parsed.TryGetValue("a", out pathA) || !parsed.TryGetValue("b", out pathB))
+            {
+                Console.Error.WriteLine("--a <file> and --b <file> are required.");
+                return 2;
+            }
+            if (!File.Exists(pathA) || !File.Exists(pathB))
+            {
+                Console.Error.WriteLine("File not found.");
+                return 2;
+            }
+
+            byte[] a = File.ReadAllBytes(pathA);
+            byte[] b = File.ReadAllBytes(pathB);
+            PcmProfile profile = ResolveProfile();
+
+            Console.WriteLine("A              : " + Path.GetFileName(pathA) + "  " + a.Length.ToString("N0") + " bytes  " + FlashService.Hash(a));
+            Console.WriteLine("B              : " + Path.GetFileName(pathB) + "  " + b.Length.ToString("N0") + " bytes  " + FlashService.Hash(b));
+
+            IList<ImageDifference> regions = ImageTools.Diff(a, b, 16);
+            long changed = 0;
+            foreach (ImageDifference region in regions) changed += region.Length;
+            Console.WriteLine("Differing bytes: " + changed.ToString("N0") +
+                              (Math.Min(a.Length, b.Length) > 0
+                                  ? "  (" + (changed * 100.0 / Math.Min(a.Length, b.Length)).ToString("0.00") + "%)"
+                                  : string.Empty));
+            Console.WriteLine("Regions        : " + regions.Count);
+            Console.WriteLine();
+
+            int shown = 0;
+            foreach (ImageDifference region in regions)
+            {
+                bool writable = region.End > profile.WriteSegments[0].Address &&
+                                region.Offset < profile.WriteSegments[0].End;
+                string label = writable ? "in write window" : "OUTSIDE write window (will not be flashed)";
+                Console.WriteLine("  " + region + "   " + label);
+                if (++shown >= 40)
+                {
+                    Console.WriteLine("  ... " + (regions.Count - shown) + " more region(s)");
+                    break;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// Prints checksum candidates for an image. Psychoflash does not rewrite Ford checksums -
+        /// see docs/CHECKSUMS.md for why, and for what would be needed to do it correctly.
+        /// </summary>
+        private static int Checksums(Dictionary<string, string> parsed)
+        {
+            string path;
+            if (!parsed.TryGetValue("in", out path))
+            {
+                Console.Error.WriteLine("--in <file.bin> is required.");
+                return 2;
+            }
+            if (!File.Exists(path))
+            {
+                Console.Error.WriteLine("No such file: " + path);
+                return 2;
+            }
+
+            byte[] image = File.ReadAllBytes(path);
+            Console.WriteLine("File        : " + Path.GetFileName(path) + "  " + image.Length.ToString("N0") + " bytes");
+            Report("whole image", image, 0, image.Length);
+
+            if (image.Length >= 0x100000)
+            {
+                Report("boot block  (0x000000-0x00FFFF)", image, 0x000000, 0x10000);
+                Report("calibration (0x010000-0x0FFFFF)", image, 0x010000, 0x0F0000);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("These are candidates, not the PCM's verdict. Compare a stock image with a");
+            Console.WriteLine("known-good tuned image: whichever scheme changes consistently is the likely");
+            Console.WriteLine("Ford checksum. See docs/CHECKSUMS.md.");
+            return 0;
+        }
+
+        private static void Report(string label, byte[] image, int offset, int length)
+        {
+            Console.WriteLine("  " + label.PadRight(32) +
+                              " sum32 0x" + ImageTools.Sum32(image, offset, length).ToString("X8") +
+                              "  sum16 0x" + ImageTools.Sum16(image, offset, length).ToString("X4") +
+                              "  crc32 0x" + ImageTools.Crc32(image, offset, length).ToString("X8"));
         }
 
         private static string DidName(ushort did)

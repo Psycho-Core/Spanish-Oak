@@ -26,6 +26,14 @@ still have to provide.
 * **Verify** the PCM contents against a file.
 * **`unlock --seed-only`** - reads the seed without sending a key, so you can check the key
   offline (`psychoflash seed`) before spending any of the PCM's security attempts.
+* **Live sensor data** - `psychoflash live` streams standard OBD-II parameters (rpm, coolant,
+  throttle, MAF, speed, battery volts) so a cranking engine can be watched: no rpm means no crank
+  signal. No proprietary tables needed.
+* **Image diff** - `psychoflash diff --a stock.bin --b tuned.bin` shows exactly which bytes a tune
+  changed and whether any of them sit outside the window that actually gets flashed.
+* **Checksum report** - `psychoflash checksums --in file.bin` prints candidate sums per region.
+  The tool does **not** rewrite Ford checksums; see [docs/CHECKSUMS.md](docs/CHECKSUMS.md) for why
+  and for the evidence that would allow it.
 * **Read and clear stored fault codes** (`0x19` / `0x14`) - no FEPS needed, so it works on a car
   that will not start. See [docs/SWAP.md](docs/SWAP.md) for what each code means in a conversion.
 * **VIN** readout (`0x22 F190`).
@@ -127,6 +135,9 @@ psychoflash dtcs                           # stored fault codes (0x19), works on
 psychoflash dtcs --clear                   # wipe them (0x14)
 psychoflash vin                            # VIN from the PCM (0x22 F190)
 psychoflash seed --seed 6A3F12             # offline key calculation (no hardware)
+psychoflash live --pid 0C,05,11            # live data while cranking (rpm, coolant, throttle)
+psychoflash diff --a stock.bin --b tuned.bin  # what the tune actually changed
+psychoflash checksums --in tuned.bin       # checksum candidates (not a fix - see docs)
 psychoflash diagnose                       # read-only health check: interface, battery, seed, VIN, codes
 psychoflash unlock --seed-only             # read the seed without spending an unlock attempt
 psychoflash keybag --file bag.txt          # parse/list seed-key constant sets

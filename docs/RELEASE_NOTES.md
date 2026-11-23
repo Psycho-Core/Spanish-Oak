@@ -16,6 +16,16 @@ Tactrix Openport, etc.).
 
 ## New in this release
 
+* **`psychoflash live`** - stream standard OBD-II data (mode 01): rpm, coolant, throttle, MAF,
+  speed, battery. `--pid 0C,05,11 --interval 250 --count 20 --csv`. Works while cranking, so
+  "0 rpm" vs "180 rpm" answers the crank-sensor question immediately.
+* **`psychoflash diff`** - byte-level comparison of two images with the changed regions marked as
+  inside or outside the flash window.
+* **`psychoflash checksums`** - candidate sums (sum32/sum16/crc32) per region, for deriving the
+  Ford scheme from a stock/known-good pair.
+* **`docs/CHECKSUMS.md`** and **`docs/PATS.md`** - what the tool does about checksums and the
+  immobiliser, and what it deliberately refuses to do.
+
 * **`psychoflash identify`** - reads the PCM's own identifiers (`0x22`: spare part number, ECU
   serial, hardware and software versions) so the box can be checked against the label.
 * **`psychoflash info --in file.bin`** - offline image check: size against the profile, SHA-256,

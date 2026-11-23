@@ -96,6 +96,19 @@ hit them:
 | `P0562` / `P0563` | Supply voltage - charging system or grounds |
 | `P1000` | Normal straight after a flash; readiness tests have not run yet |
 
+## Watching it crank
+
+`psychoflash live --pid 0C,05,11,42 --interval 250` shows rpm, coolant, throttle and battery while
+you turn it over. What to look for:
+
+| Reading | Meaning |
+| --- | --- |
+| rpm stays 0 while cranking | no crank signal - sensor, gap, flywheel or wiring |
+| rpm ~150-250 and rising | trigger is fine, so look at fuel and spark |
+| throttle doesn't move with the pedal | pedal/throttle body mismatch, expect `P2135`/`P2101` |
+| coolant reads -40 C | sensor open circuit |
+| battery below 10 V while cranking | voltage problem, and a PCM reset will follow |
+
 ## Where the tool still stops short
 
 * **No live data yet.** You can read which code is set, but not watch RPM, coolant, throttle or

@@ -438,8 +438,99 @@ namespace PsychoFlash.Core.Flashing
     }
 
     /// <summary>Helpers for the binary files themselves.</summary>
+    /// <summary>A contiguous run of bytes that differs between two images.</summary>
+    public sealed class ImageDifference
+    {
+        public int Offset { get; private set; }
+        public int Length { get; private set; }
+
+        public ImageDifference(int offset, int length)
+        {
+            Offset = offset;
+            Length = length;
+        }
+
+        public int End { get { return Offset + Length; } }
+
+        public override string ToString()
+        {
+            return "0x" + Offset.ToString("X6") + " + 0x" + Length.ToString("X4");
+        }
+    }
+
     public static class ImageTools
     {
+        /// <summary>
+        /// Compares two images and returns the runs of differing bytes, coalescing differences
+        /// that are closer together than <paramref name="gapTolerance"/> so a few scattered bytes
+        /// become one readable region.
+        /// </summary>
+        public static IList<ImageDifference> Diff(byte[] a, byte[] b, int gapTolerance)
+        {
+            if (a == null || b == null) throw new ArgumentNullException(a == null ? "a" : "b");
+            int n = Math.Min(a.Length, b.Length);
+            List<ImageDifference> regions = new List<ImageDifference>();
+
+            int start = -1;
+            int last = -1;
+            for (int i = 0; i < n; i++)
+            {
+                if (a[i] == b[i]) continue;
+                if (start < 0)
+                {
+                    start = i;
+                }
+                else if (i - last > gapTolerance)
+                {
+                    regions.Add(new ImageDifference(start, last - start + 1));
+                    start = i;
+                }
+                last = i;
+            }
+            if (start >= 0) regions.Add(new ImageDifference(start, last - start + 1));
+
+            // Length mismatch shows up as one trailing region rather than being ignored.
+            if (a.Length != b.Length)
+            {
+                int longer = Math.Max(a.Length, b.Length);
+                regions.Add(new ImageDifference(n, longer - n));
+            }
+            return regions;
+        }
+
+        /// <summary>Sum of the bytes, modulo 2^32 - the simplest calibration checksum scheme.</summary>
+        public static uint Sum32(byte[] data, int offset, int length)
+        {
+            if (data == null) return 0;
+            int end = Math.Min(data.Length, offset + length);
+            uint sum = 0;
+            for (int i = Math.Max(0, offset); i < end; i++) sum += data[i];
+            return sum;
+        }
+
+        /// <summary>Sum of the bytes, modulo 2^16.</summary>
+        public static ushort Sum16(byte[] data, int offset, int length)
+        {
+            return (ushort)(Sum32(data, offset, length) & 0xFFFF);
+        }
+
+        /// <summary>CRC-32 (IEEE 802.3), the usual non-Ford choice, printed for comparison.</summary>
+        public static uint Crc32(byte[] data, int offset, int length)
+        {
+            if (data == null) return 0;
+            uint crc = 0xFFFFFFFFu;
+            int end = Math.Min(data.Length, offset + length);
+            for (int i = Math.Max(0, offset); i < end; i++)
+            {
+                crc ^= data[i];
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : crc >> 1;
+                }
+            }
+            return ~crc;
+        }
+
         /// <summary>True when the buffer looks like an all-0x00 or all-0xFF (blank) flash.</summary>
         public static bool IsBlank(byte[] image)
         {

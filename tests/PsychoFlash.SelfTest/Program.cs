@@ -27,6 +27,8 @@ namespace PsychoFlash.SelfTest
             TestFrameConstruction();
             TestReadResponseFraming();
             TestImageTools();
+            TestImageDiffAndChecksums();
+            TestObdPids();
             TestDiagnosticCodes();
             TestNegativeResponseCodes();
 
@@ -300,6 +302,39 @@ namespace PsychoFlash.SelfTest
         /// The 0x19 answer is decoded without hardware, so the parser is pinned here. A dump of
         /// the codes is the first thing to look at when a swapped engine cranks but will not run.
         /// </summary>
+        /// <summary>
+        /// Live data is decoded from the standard J1979 scaling, so a wrong formula would show up
+        /// as a wrong number on the driver's screen. Pinned here.
+        /// </summary>
+        private static void TestObdPids()
+        {
+            Console.WriteLine("OBD-II live data decoding");
+
+            CheckEqual(0x01, ObdPids.ServiceCurrentData, "mode 01 is the current-data service");
+            Check(ObdPids.Describe(0x0C).Contains("rpm"), "0x0C is engine speed");
+
+            Check(ObdPids.Format(0x0C, new byte[] { 0x0F, 0xA0 }) == "1000 rpm", "0x0FA0 decodes to 1000 rpm");
+            Check(ObdPids.Format(0x05, new byte[] { 0x50 }) == "40 C", "0x50 decodes to 40 C coolant");
+            Check(ObdPids.Format(0x0F, new byte[] { 0x00 }) == "-40 C", "0x00 decodes to -40 C");
+            Check(ObdPids.Format(0x11, new byte[] { 0xFF }) == "100.0 %", "throttle wide open is 100 %");
+            Check(ObdPids.Format(0x10, new byte[] { 0x01, 0xF4 }) == "5.00 g/s", "0x01F4 decodes to 5 g/s");
+            Check(ObdPids.Format(0x42, new byte[] { 0x2E, 0xE0 }) == "12.00 V", "0x2EE0 decodes to 12 V");
+            Check(ObdPids.Format(0x0D, new byte[] { 0x64 }) == "100 km/h", "speed is one byte");
+            Check(ObdPids.Format(0x7A, new byte[] { 0xDE, 0xAD }) == "DE AD", "unknown PID is shown as hex");
+
+            byte[] answer = new byte[] { 0x41, 0x0C, 0x0F, 0xA0 };
+            byte[] payload = ObdPids.ExtractPayload(0x0C, answer);
+            Check(payload != null && payload.Length == 2 && payload[0] == 0x0F, "payload is taken after the echoed PID");
+            Check(ObdPids.ExtractPayload(0x05, answer) == null, "answer for another PID is rejected");
+            Check(ObdPids.ExtractPayload(0x0C, new byte[] { 0x41 }) == null, "truncated answer is rejected");
+
+            byte[] pids = ObdPids.ParseList("0C,05,11");
+            CheckEqual(3, pids.Length, "PID list parses");
+            Check(pids.Length == 3 && pids[0] == 0x0C && pids[2] == 0x11, "PID list keeps order");
+            CheckEqual(2, ObdPids.ParseList("0x0C 05").Length, "0x prefix and space separator accepted");
+            Check(Throws<FormatException>(delegate { ObdPids.ParseList("ZZ"); }), "bad PID is rejected");
+        }
+
         private static void TestDiagnosticCodes()
         {
             Console.WriteLine("Diagnostic trouble codes (0x19)");
@@ -346,6 +381,42 @@ namespace PsychoFlash.SelfTest
             Check(DiagnosticCodes.Describe("P0335").Contains("crankshaft"), "P0335 describes the crank sensor");
             Check(DiagnosticCodes.Describe("P2101").Contains("throttle"), "P2101 describes the throttle actuator");
             Check(DiagnosticCodes.Describe("Z9999").Length == 0, "unknown code has no description");
+        }
+
+        /// <summary>
+        /// Diff and checksum helpers: the tool does not correct Ford checksums, so what it can do
+        /// is report them accurately and show exactly which bytes a tune changed.
+        /// </summary>
+        private static void TestImageDiffAndChecksums()
+        {
+            Console.WriteLine("Image diff and checksum candidates");
+
+            byte[] a = new byte[32];
+            byte[] b = new byte[32];
+            b[3] = 0x11;
+            b[4] = 0x22;
+            b[20] = 0x33;
+
+            // Tolerance 8: bytes 3 and 4 collapse into one region, byte 20 is a second one.
+            IList<ImageDifference> regions = ImageTools.Diff(a, b, 8);
+            CheckEqual(2, regions.Count, "close differences collapse into one region");
+            Check(regions.Count == 2 && regions[0].Offset == 3 && regions[0].Length == 2, "first region is 0x3 + 0x2");
+            Check(regions.Count == 2 && regions[1].Offset == 20 && regions[1].Length == 1, "second region is 0x14 + 0x1");
+
+            CheckEqual(0, ImageTools.Diff(a, a, 8).Count, "identical images have no regions");
+
+            IList<ImageDifference> longer = ImageTools.Diff(new byte[8], new byte[12], 16);
+            Check(longer.Count == 1 && longer[0].Offset == 8 && longer[0].Length == 4,
+                  "a length mismatch is reported, not ignored");
+
+            byte[] little = new byte[] { 0x01, 0x02, 0x03 };
+            CheckEqual(6, ImageTools.Sum32(little, 0, 3), "sum32");
+            CheckEqual(6, ImageTools.Sum16(little, 0, 3), "sum16");
+            CheckEqual(2, ImageTools.Sum32(little, 1, 1), "sum over a window (second byte = 0x02)");
+
+            // CRC-32 of "123456789" is the standard check value.
+            byte[] check = System.Text.Encoding.ASCII.GetBytes("123456789");
+            CheckEqual(0xCBF43926, ImageTools.Crc32(check, 0, check.Length), "crc32 check value");
         }
 
         private static void TestNegativeResponseCodes()

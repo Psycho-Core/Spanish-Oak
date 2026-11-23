@@ -393,6 +393,23 @@ namespace PsychoFlash.Core.Protocol
             return r;
         }
 
+        /// <summary>
+        /// 0x01 - reads one OBD-II parameter (SAE J1979 mode 01). Returns the data bytes after the
+        /// echoed PID, or null when the PCM does not support that PID.
+        /// </summary>
+        public byte[] ReadPid(byte pid)
+        {
+            try
+            {
+                byte[] r = Request(new byte[] { ObdPids.ServiceCurrentData, pid }, 3);
+                return ObdPids.ExtractPayload(pid, r);
+            }
+            catch (NegativeResponseException)
+            {
+                return null;
+            }
+        }
+
         /// <summary>0x22 - reads a data identifier, e.g. 0xF190 for the VIN.</summary>
         public byte[] ReadDataByIdentifier(ushort did)
         {
