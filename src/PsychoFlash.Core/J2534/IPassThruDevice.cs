@@ -24,7 +24,10 @@ namespace PsychoFlash.Core.J2534
         /// <summary>Battery voltage in millivolts.</summary>
         uint ReadBatteryVoltage();
 
-        /// <summary>Applies (or removes) the programming voltage on the given pin.</summary>
+        /// <summary>
+        /// Applies (or removes) the programming voltage on the given pin, in **millivolts** - the
+        /// unit the J2534 API uses. Callers convert from the volts the profiles are written in.
+        /// </summary>
         void SetProgrammingVoltage(uint pinNumber, uint voltage);
 
         /// <summary>Drops anything queued in the interface's receive buffer.</summary>

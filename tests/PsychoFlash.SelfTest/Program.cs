@@ -528,7 +528,14 @@ namespace PsychoFlash.SelfTest
             tuned[0x080000] = 0x34;
             tuned[0x0FFFFF] = 0x56;
 
-            service.WriteImage(tuned, null, System.Threading.CancellationToken.None);
+            try
+            {
+                service.WriteImage(tuned, null, System.Threading.CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Check(false, "write failed: " + ex.Message + "  | last PCM trace: " + Tail(pcm, 10));
+            }
             Check(pcm.BlocksTransferred == (0x0F0000 / profile.WriteBlockSize),
                   "every block of the write window was transferred (" + pcm.BlocksTransferred + ")");
             CheckEqual(0, FirstDifference(pcm.Flash, tuned, 0x010000, 0x0F0000), "flashed bytes match the file");
@@ -570,6 +577,18 @@ namespace PsychoFlash.SelfTest
             service.LeaveProgrammingMode();
             Check(!pcm.ProgrammingVoltageApplied, "FEPS removed on leaving programming mode");
             Check(log.Count > 10, "the log recorded the session (" + log.Count + " lines)");
+        }
+
+        private static string Tail(SimulatedPcm pcm, int count)
+        {
+            int start = Math.Max(0, pcm.Trace.Count - count);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int i = start; i < pcm.Trace.Count; i++)
+            {
+                if (sb.Length > 0) sb.Append(" | ");
+                sb.Append(pcm.Trace[i]);
+            }
+            return sb.ToString();
         }
 
         private static bool SameBytes(byte[] a, byte[] b)

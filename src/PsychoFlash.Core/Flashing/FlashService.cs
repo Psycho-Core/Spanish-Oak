@@ -93,7 +93,7 @@ namespace PsychoFlash.Core.Flashing
         public void EnterProgrammingMode(bool promptForIgnitionCycle)
         {
             Log("Enabling FEPS (" + _profile.ProgrammingVoltage + " V) ...");
-            _client.Device.SetProgrammingVoltage(_profile.ProgrammingPin, _profile.ProgrammingVoltage);
+            _client.Device.SetProgrammingVoltage(_profile.ProgrammingPin, (uint)_profile.ProgrammingVoltage * 1000);
 
             if (promptForIgnitionCycle && RequestOperatorAction != null)
             {
