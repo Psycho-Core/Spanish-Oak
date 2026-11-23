@@ -128,10 +128,21 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item publish/standalone/PsychoFlash.exe dist/PsychoFlash-standalone.exe
-          Compress-Archive -Path src/PsychoFlash.App/bin/Release/net48/* -DestinationPath dist/PsychoFlash-net48.zip -Force
-          Compress-Archive -Path src/PsychoFlash.App/bin/Release/net8.0-windows/* -DestinationPath dist/PsychoFlash-net8.0-windows.zip -Force
-          Compress-Archive -Path src/PsychoFlash.Cli/bin/Release/net8.0/* -DestinationPath dist/psychoflash-cli-net8.0.zip -Force
+          # Only the top level files belong in the framework dependent zips; the self contained
+          # publish also leaves a win-x64 folder under bin and that must not be shipped twice.
+          function Zip-Root([string]$dir, [string]$zip) {
+            $files = Get-ChildItem -Path $dir -File
+            if (-not $files) { throw "no files in $dir" }
+            Compress-Archive -Path $files.FullName -DestinationPath $zip -Force
+            "{0}: {1} files" -f (Split-Path $zip -Leaf), $files.Count
+          }
+          Zip-Root "src/PsychoFlash.App/bin/Release/net48" "dist/PsychoFlash-net48.zip"
+          Zip-Root "src/PsychoFlash.App/bin/Release/net8.0-windows" "dist/PsychoFlash-net8.0-windows.zip"
+          Zip-Root "src/PsychoFlash.Cli/bin/Release/net8.0" "dist/psychoflash-cli-net8.0.zip"
           Get-ChildItem dist | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+          if ((Get-Item dist/PsychoFlash-net8.0-windows.zip).Length -gt 20MB) {
+            throw "framework dependent zip is too big - the self contained publish leaked into it"
+          }
 
       - name: Publish GitHub release
         shell: pwsh
