@@ -54,7 +54,7 @@ namespace PsychoFlash.Cli
                     case "seed":
                         return Seed(parsed);
                     case "info":
-                        return Info();
+                        return Info(parsed);
                     case "read":
                         return Read(parsed);
                     case "write":
@@ -75,6 +75,9 @@ namespace PsychoFlash.Cli
                     case "diagnose":
                     case "check":
                         return Diagnose();
+                    case "identify":
+                    case "id":
+                        return Identify();
                     default:
                         Console.Error.WriteLine("Unknown command '" + command + "'.");
                         PrintUsage();
@@ -112,6 +115,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  keybag --file <bag.txt>    Parse and list a keybag of seed/key constant sets");
             Console.WriteLine("  unlock [--seed-only]       Apply FEPS, read the seed, run 0x27 (nothing is written)");
             Console.WriteLine("  diagnose                   Read-only health check: interface, battery, seed, VIN, codes");
+            Console.WriteLine("  identify                   Read the PCM part number / hardware / software identifiers (0x22)");
+            Console.WriteLine("  info --in <file.bin>       Inspect a saved image offline (size, hash, strings)");
             Console.WriteLine();
             Console.WriteLine("Options");
             Console.WriteLine("  --dll <path>               J2534 driver DLL (default: first interface in the registry)");
@@ -130,6 +135,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  psychoflash seed  --seed 6A3F12");
             Console.WriteLine("  psychoflash dtcs");
             Console.WriteLine("  psychoflash dtcs --clear");
+            Console.WriteLine("  psychoflash identify");
+            Console.WriteLine("  psychoflash info --in barra-stock.bin");
             Console.WriteLine("  psychoflash diagnose");
             Console.WriteLine("  psychoflash unlock --seed-only");
             Console.WriteLine("  psychoflash keybag --file keybag.txt");
@@ -429,14 +436,129 @@ namespace PsychoFlash.Cli
             return session;
         }
 
-        private static int Info()
+        private static int Info(Dictionary<string, string> parsed)
         {
+            string path;
+            if (parsed.TryGetValue("in", out path))
+            {
+                return InspectImage(path);
+            }
+
             using (FlashSession session = CreateSession(true))
             {
+                Console.WriteLine("Interface      : firmware " + session.Device.FirmwareVersion + ", DLL " + session.Device.DllVersion);
                 Console.WriteLine("Battery voltage: " + session.ReadBatteryVoltage().ToString("0.00") + " V");
                 Console.WriteLine("PCM VIN        : " + (session.Client.ReadVehicleIdentification() ?? string.Empty));
+                Console.WriteLine();
+                Console.WriteLine("Run 'psychoflash identify' for the part number and software identifiers.");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// Offline image report - the check to run on a fresh dump before trusting it, and on a
+        /// tuned file before flashing it.
+        /// </summary>
+        private static int InspectImage(string path)
+        {
+            if (!File.Exists(path))
+            {
+                Console.Error.WriteLine("No such file: " + path);
+                return 2;
+            }
+            byte[] image = File.ReadAllBytes(path);
+            PcmProfile profile = ResolveProfile();
+
+            Console.WriteLine("File           : " + Path.GetFileName(path));
+            Console.WriteLine("Size           : " + image.Length.ToString("N0") + " bytes (0x" + image.Length.ToString("X") + ")");
+            Console.WriteLine("Profile        : " + profile.Name);
+            Console.WriteLine("Expected size  : " + profile.ImageSize.ToString("N0") + " bytes");
+            Console.WriteLine("SHA-256        : " + FlashService.Hash(image));
+            Console.WriteLine("Blank (00/FF)  : " + (ImageTools.IsBlank(image) ? "YES - this is not a valid read" : "no"));
+
+            bool sizeOk = image.Length == profile.ImageSize;
+            Console.WriteLine("Size matches   : " + (sizeOk ? "yes" : "NO - a write would be refused"));
+
+            // A real calibration has plenty of printable text (strategy, part number, VIN block).
+            IList<string> strings = ImageTools.FindPrintableStrings(image, 8, 12);
+            Console.WriteLine("Strings        : " + strings.Count + " printable run(s) of 8+ characters");
+            foreach (string text in strings) Console.WriteLine("                 " + text);
+
+            bool plausible = sizeOk && !ImageTools.IsBlank(image) && strings.Count >= 4;
+            Console.WriteLine();
+            Console.WriteLine(plausible
+                ? "Looks like a real Spanish Oak image."
+                : "DOES NOT look like a usable image - re-read the PCM and compare the size and strings.");
+            return plausible ? 0 : 1;
+        }
+
+        private static string DidName(ushort did)
+        {
+            switch (did)
+            {
+                case 0xF187: return "spare part number";
+                case 0xF188: return "ECU repair shop code";
+                case 0xF18C: return "ECU serial number";
+                case 0xF190: return "VIN";
+                case 0xF191: return "hardware version";
+                case 0xF194: return "software version (supplier)";
+                case 0xF195: return "software version";
+                case 0xF1A0: return "diagnostic variant";
+                default: return "identifier";
+            }
+        }
+
+        /// <summary>
+        /// Reads the identification data identifiers. Everything is best effort: a PCM that does
+        /// not support a DID answers with a negative response and the next one is tried.
+        /// </summary>
+        private static int Identify()
+        {
+            ushort[] dids = new ushort[] { 0xF187, 0xF188, 0xF18C, 0xF190, 0xF191, 0xF194, 0xF195, 0xF1A0 };
+            int found = 0;
+
+            using (FlashSession session = CreateSession(true))
+            {
+                foreach (ushort did in dids)
+                {
+                    try
+                    {
+                        byte[] value = session.Client.ReadDataByIdentifier(did);
+                        if (value == null || value.Length == 0)
+                        {
+                            Console.WriteLine("0x" + did.ToString("X4") + "  " + DidName(did).PadRight(28) + "(no answer)");
+                            continue;
+                        }
+                        found++;
+                        Console.WriteLine("0x" + did.ToString("X4") + "  " + DidName(did).PadRight(28) +
+                                           PrintableAscii(value) + "   [" + FordPcmClient.BytesToHex(value) + "]");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("0x" + did.ToString("X4") + "  " + DidName(did).PadRight(28) + "(" + ex.Message + ")");
+                    }
+                }
+            }
+
+            Console.WriteLine();
+            if (found == 0)
+            {
+                Console.WriteLine("No identifiers were readable. That is normal before FEPS/unlock on some");
+                Console.WriteLine("PCMs - try 'psychoflash unlock --seed-only' first, then identify again.");
+                return 1;
+            }
+            Console.WriteLine("Confirm the part number above matches the label on the PCM before flashing.");
+            return 0;
+        }
+
+        private static string PrintableAscii(byte[] value)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            foreach (byte b in value)
+            {
+                sb.Append(b >= 0x20 && b <= 0x7E ? (char)b : '.');
+            }
+            return sb.ToString();
         }
 
         private static CancellationTokenSource CreateCancellation()

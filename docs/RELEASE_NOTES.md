@@ -16,6 +16,12 @@ Tactrix Openport, etc.).
 
 ## New in this release
 
+* **`psychoflash identify`** - reads the PCM's own identifiers (`0x22`: spare part number, ECU
+  serial, hardware and software versions) so the box can be checked against the label.
+* **`psychoflash info --in file.bin`** - offline image check: size against the profile, SHA-256,
+  blank test and the calibration strings. Refuses an image that does not look real.
+* README now lists the supported PCM part-number families (BF `5R29-12A650-xx`, FG `8R29-...`).
+
 * **`psychoflash diagnose`** - read-only health check: interface versions, battery voltage, seed,
   VIN and stored codes. Nothing is written, nothing is erased.
 * **`psychoflash unlock [--seed-only]`** - tests `0x27` without flashing anything. `--seed-only`

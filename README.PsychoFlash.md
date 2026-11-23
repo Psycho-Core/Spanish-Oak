@@ -54,6 +54,27 @@ verified by the self test on both Windows and Linux:
 Build status: `.github/workflows/build.yml` runs on every push; a failing self-test line shows up
 as a check annotation on the run.
 
+## Which PCMs this supports
+
+| PCM | Vehicles | Part number family | Profile |
+| --- | --- | --- | --- |
+| Spanish Oak 1024k (EEC-VI) | BF Falcon 2005-2008 (XT, XR6, XR6 Turbo, Fairmont, Fairlane, Territory SY/SZ 4.0) | `5R29-12A650-xx`, `6R29-12A650-xx` (e.g. **5R29-12A650-CC** = BF / SY Territory 4.0 N/A, 4-speed auto) | `falcon` |
+| Spanish Oak 1024k | FG / FG II / FG-X Falcon | `8R29-12A650-xx` | `falcon` |
+| Black Oak dual bank | Aston Martin V8/V12 era | - | `blackoak` |
+
+The part number tells you the *family*, not the calibration: turbo, N/A, manual and automatic
+applications all share the protocol and the 1 MB layout, but the tune inside is different. Confirm
+what you actually have before writing anything:
+
+```console
+psychoflash identify                    # 0x22 identifiers: part number, hardware, software
+psychoflash read --out stock.bin
+psychoflash info --in stock.bin         # size, SHA-256, blank check, strategy strings
+```
+
+`identify` prints the PCM's own part number - check it against the label on the box. `info --in`
+refuses an image that is the wrong size, blank, or has no plausible calibration text.
+
 ## Requirements
 
 * Windows (J2534 drivers are Windows only).

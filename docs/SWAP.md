@@ -4,6 +4,27 @@ PsychoFlash moves a 1 MB calibration image between your PC and a Ford EEC-VI **S
 PCM. That is one step of a swap, not the whole thing. This page separates the parts so you know
 what the tool does, what your tuner has to do, and what is wiring.
 
+## Is this PCM supported?
+
+A BF Falcon / SY Territory PCM such as **5R29-12A650-CC** (4.0L Barra, N/A, 4-speed auto) is the
+Spanish Oak 1024k family this tool targets: CAN `0x7E0`/`0x7E8` at 500 kbit/s, FEPS 18 V, 1 MB
+image, calibration area `0x010000-0x0FFFFF`, erase `B2 AA`. The same profile covers `6R29-` and
+`8R29-` (FG/FG II/FG-X) parts, N/A and turbo, manual and automatic - the protocol does not care,
+the *calibration* does.
+
+The part number labels the family, so verify the individual PCM before writing to it:
+
+1. `psychoflash identify` - the PCM reports its own part number, hardware and software identifiers
+   (`0x22` DIDs). Compare with the label. Some PCMs only answer after the unlock, which is another
+   reason to run `unlock --seed-only` first.
+2. `psychoflash read --out stock.bin` - must be exactly 1,048,576 bytes, and
+3. `psychoflash info --in stock.bin` - must show a non-blank image with calibration strings and no
+   size mismatch.
+
+If all three pass, the tool is talking to the PCM the way it expects. If the read comes back a
+different size or all `00`/`FF`, stop: that means the profile is wrong for that PCM, and the same
+mistake during a write is how boot blocks get erased.
+
 ## What PsychoFlash does
 
 | Job | Command | Notes |
