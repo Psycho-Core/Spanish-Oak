@@ -345,6 +345,8 @@ namespace PsychoFlash.App
             _eraseButton.Enabled = enabled && _session != null;
             _verifyButton.Enabled = enabled && _session != null;
             _unlockButton.Enabled = enabled && _session != null;
+            _batteryButton.Enabled = enabled && _session != null;
+            _readButton.Enabled = enabled && _session != null;
             if (!busy)
             {
                 _progress.Value = 0;
@@ -457,20 +459,27 @@ namespace PsychoFlash.App
 
             RunBackground("Verifying flash", delegate(CancellationToken token, Progress<FlashProgress> progress)
             {
-                _session.Client.ControlDtcSetting(false);
-                if (!_session.Service.Unlock(_session.KeyAlgorithm))
+                _session.Service.EnterProgrammingMode(true);
+                try
                 {
-                    Log("Security access not granted - cannot verify.");
-                    return;
-                }
-                int diff = _session.Service.VerifyImage(image, progress, token);
-                Log(diff == 0 ? "Verification OK: PCM matches the file." : "Verification FAILED: " + diff + " bytes differ.");
-                if (diff == 0)
-                {
-                    BeginInvoke(new Action(delegate
+                    if (!_session.Service.Unlock(_session.KeyAlgorithm))
                     {
-                        MessageBox.Show(this, "PCM matches the file.", "PsychoFlash - verify", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }));
+                        Log("Security access not granted - cannot verify.");
+                        return;
+                    }
+                    int diff = _session.Service.VerifyImage(image, progress, token);
+                    Log(diff == 0 ? "Verification OK: PCM matches the file." : "Verification FAILED: " + diff + " bytes differ.");
+                    if (diff == 0)
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            MessageBox.Show(this, "PCM matches the file.", "PsychoFlash - verify", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }));
+                    }
+                }
+                finally
+                {
+                    _session.Service.LeaveProgrammingMode();
                 }
             });
         }

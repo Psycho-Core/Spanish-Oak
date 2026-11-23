@@ -59,6 +59,12 @@ namespace PsychoFlash.Core.Flashing
         /// <summary>Number of retries for a single flash block.</summary>
         public int BlockRetries { get; set; } = 3;
 
+        /// <summary>
+        /// Sends 0x3E tester present every N blocks to keep a long read or write inside the PCM's
+        /// session timer. 0 disables it (the default, matching the reference tool).
+        /// </summary>
+        public int KeepAliveEveryBlocks { get; set; }
+
         /// <summary>Called when the tool needs the operator to cycle the ignition for FEPS.</summary>
         public Action<string> RequestOperatorAction { get; set; }
 
@@ -78,8 +84,10 @@ namespace PsychoFlash.Core.Flashing
         }
 
         /// <summary>
-        /// Applies 18 V to the Ford FEPS pin, opens the programming session and disables DTC
-        /// logging. The operator is asked to cycle the ignition so the PCM sees the FEPS edge.
+        /// Applies 18 V to the Ford FEPS pin, then asks for the programming session and disables
+        /// DTC logging. On EEC-VI the FEPS edge is what actually opens the PCM, so a rejected
+        /// session or DTC request is logged and ignored rather than aborting the flash - the
+        /// reference tool behaves the same way.
         /// </summary>
         public void EnterProgrammingMode(bool promptForIgnitionCycle)
         {
@@ -92,9 +100,26 @@ namespace PsychoFlash.Core.Flashing
             }
             Thread.Sleep(500);
 
-            _client.StartDiagnosticSession(_profile.ProgrammingSession);
-            _client.ControlDtcSetting(false);
-            _client.TesterPresent();
+            TryService("0x10 programming session", delegate { _client.StartDiagnosticSession(_profile.ProgrammingSession); });
+            TryService("0x85 control DTC setting", delegate { _client.ControlDtcSetting(false); });
+            TryService("0x3E tester present", delegate { _client.TesterPresent(); });
+        }
+
+        /// <summary>Runs an optional service, logging (but not propagating) a rejection.</summary>
+        private void TryService(string name, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (NegativeResponseException ex)
+            {
+                Log("  " + name + " rejected: " + ex.Message + " (continuing)");
+            }
+            catch (TimeoutException)
+            {
+                Log("  " + name + " got no answer (continuing)");
+            }
         }
 
         /// <summary>Turns the programming voltage off again.</summary>
@@ -197,6 +222,10 @@ namespace PsychoFlash.Core.Flashing
 
                     Array.Copy(data, 0, image, written, block);
                     written += block;
+                    if (KeepAliveEveryBlocks > 0 && (written / _profile.ReadBlockSize) % KeepAliveEveryBlocks == 0)
+                    {
+                        TryService("0x3E tester present", delegate { _client.TesterPresent(); });
+                    }
                     Notify(progress, written, total, "Reading flash");
                 }
             }
@@ -262,6 +291,10 @@ namespace PsychoFlash.Core.Flashing
                     }
 
                     sent += block;
+                    if (KeepAliveEveryBlocks > 0 && (sent / _profile.WriteBlockSize) % KeepAliveEveryBlocks == 0)
+                    {
+                        TryService("0x3E tester present", delegate { _client.TesterPresent(); });
+                    }
                     Notify(progress, sent, total, "Writing flash");
                 }
             }

@@ -1,0 +1,70 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Show SDK
+        run: dotnet --info
+
+      - name: Restore
+        run: dotnet restore PsychoFlash.sln
+
+      - name: Build (Release, net48 + net8.0-windows)
+        run: dotnet build PsychoFlash.sln -c Release --no-restore
+
+      - name: Self tests (seed/key vectors, profile contract, framing)
+        run: dotnet run --project tests/PsychoFlash.SelfTest -c Release --no-build
+
+      - name: Python tools
+        shell: pwsh
+        run: |
+          python -m py_compile tools/pyinstaller_extract.py tools/recover_il.py tools/seedkey_reference.py
+          python tools/seedkey_reference.py --self-test
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: PsychoFlash-windows
+          if-no-files-found: error
+          path: |
+            src/PsychoFlash.App/bin/Release/net8.0-windows/**
+            src/PsychoFlash.App/bin/Release/net48/**
+            src/PsychoFlash.Cli/bin/Release/net8.0/**
+
+  core:
+    name: Core portability (Linux, no WinForms)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build PsychoFlash.Core
+        run: dotnet build src/PsychoFlash.Core/PsychoFlash.Core.csproj -c Release
+
+      - name: Self test runner on Linux
+        run: dotnet run --project tests/PsychoFlash.SelfTest -c Release

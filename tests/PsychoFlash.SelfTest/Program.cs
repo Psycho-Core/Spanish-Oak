@@ -22,6 +22,8 @@ namespace PsychoFlash.SelfTest
             TestSeedKeyVectors();
             TestSeedParsing();
             TestProfileMapping();
+            TestFalconProfileContract();
+            TestFrameConstruction();
             TestImageTools();
             TestNegativeResponseCodes();
 
@@ -111,6 +113,66 @@ namespace PsychoFlash.SelfTest
             CheckEqual(0x170000, blackOak.ImageSize, "Black Oak image size");
             CheckEqual(0x0, blackOak.MapAddressToImageOffset(0), "Black Oak bank 1 starts at 0");
             CheckEqual(0x70000, blackOak.MapAddressToImageOffset(0x500000), "Black Oak bank 2 starts at image 0x70000");
+        }
+
+        /// <summary>
+        /// The exact contract the BF Barra Spanish Oak 1024k PCM needs. If any of these change,
+        /// a BF Falcon will stop talking to the tool.
+        /// </summary>
+        private static void TestFalconProfileContract()
+        {
+            Console.WriteLine("BF Barra / Spanish Oak 1024k profile contract");
+            PcmProfile falcon = PcmProfile.SpanishOakFalcon();
+
+            CheckEqual(0x7E0, falcon.RequestId, "tester CAN id");
+            CheckEqual(0x7E8, falcon.ResponseId, "PCM CAN id");
+            CheckEqual(500000, falcon.BaudRate, "CAN bit rate");
+            CheckEqual(0x85, falcon.ProgrammingSession, "programming session (0x10)");
+            CheckEqual(18, falcon.ProgrammingVoltage, "FEPS voltage");
+            CheckEqual(0x80, falcon.ProgrammingPin, "FEPS pin");
+            CheckEqual(0x400, falcon.ReadBlockSize, "read block size (0x23)");
+            CheckEqual(0x400, falcon.WriteBlockSize, "transfer block size (0x36)");
+            CheckEqual(0x100000, falcon.ImageSize, "image size (1 MB)");
+            CheckEqual(1, falcon.ReadSegments.Count, "single read window");
+            CheckEqual(0x000000, falcon.ReadSegments[0].Address, "read window start");
+            CheckEqual(0x100000, falcon.ReadSegments[0].Length, "read window length");
+            CheckEqual(1, falcon.WriteSegments.Count, "single write window");
+            CheckEqual(0x010000, falcon.WriteSegments[0].Address, "write window starts after the boot block");
+            CheckEqual(0x0F0000, falcon.WriteSegments[0].Length, "write window length");
+            CheckEqual(0xB2, falcon.ErasePayload[0], "erase service");
+            CheckEqual(0xAA, falcon.ErasePayload[1], "erase parameter");
+
+            byte[] download = falcon.RequestDownloadPayload;
+            byte[] expected = new byte[] { 0x00, 0x01, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00 };
+            CheckEqual(expected.Length, download.Length, "request download parameter length");
+            for (int i = 0; i < expected.Length; i++)
+            {
+                CheckEqual(expected[i], download[i], "request download byte " + i);
+            }
+        }
+
+        private static void TestFrameConstruction()
+        {
+            Console.WriteLine("J2534 message framing");
+            PcmProfile falcon = PcmProfile.SpanishOakFalcon();
+            byte[] frame = FordPcmClient.BuildFrame(falcon, new byte[] { 0x27, 0x01 });
+
+            CheckEqual(6, frame.Length, "frame length (4 byte id + payload)");
+            CheckEqual(0x00, frame[0], "id byte 0");
+            CheckEqual(0x07, frame[2], "id byte 2 (0x07)");
+            CheckEqual(0xE0, frame[3], "id byte 3 (0xE0)");
+            CheckEqual(0x27, frame[4], "service byte");
+            CheckEqual(0x01, frame[5], "sub-function byte");
+
+            byte[] response = new byte[] { 0x00, 0x00, 0x07, 0xE8, 0x67, 0x01, 0x12, 0x34, 0x56 };
+            byte[] payload = FordPcmClient.StripCanId(response);
+            CheckEqual(5, payload.Length, "response payload length");
+            CheckEqual(0x67, payload[0], "response service byte");
+            CheckEqual(0x12, payload[2], "first seed byte");
+
+            PcmProfile blackOak = PcmProfile.BlackOakDual();
+            byte[] big = FordPcmClient.BuildFrame(blackOak, new byte[0x401]);
+            CheckEqual(0x405, big.Length, "multi-frame transfer length");
         }
 
         private static void TestImageTools()

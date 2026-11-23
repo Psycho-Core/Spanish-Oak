@@ -93,17 +93,29 @@ namespace PsychoFlash.Core.Protocol
         /// <summary>Default per-request timeout in milliseconds (response pending restarts it).</summary>
         public uint ResponseTimeout { get; set; } = 2000;
 
+        /// <summary>
+        /// Timeout for handing a request to the interface. Multi-frame transfers (0x36) need more
+        /// than the response timeout because the driver has to clock every ISO-TP frame out.
+        /// </summary>
+        public uint WriteTimeout { get; set; } = 5000;
+
         private void Log(string message)
         {
             _log(message);
         }
 
-        /// <summary>Wraps a service payload in the J2534 CAN identifier header and sends it.</summary>
-        public void SendRaw(byte[] payload)
+        /// <summary>
+        /// Prefixes a service payload with the four byte CAN identifier, which is what a J2534
+        /// ISO15765 message expects. Kept static so the framing can be unit tested without hardware.
+        /// </summary>
+        public static byte[] BuildFrame(PcmProfile profile, byte[] payload)
         {
-            uint id = _profile.RequestId;
+            if (profile == null) throw new ArgumentNullException("profile");
+            if (payload == null) throw new ArgumentNullException("payload");
+
+            uint id = profile.RequestId;
             byte[] frame = new byte[payload.Length + 4];
-            if (_profile.Use29BitIdentifier)
+            if (profile.Use29BitIdentifier)
             {
                 frame[0] = (byte)(id >> 24);
                 frame[1] = (byte)(id >> 16);
@@ -118,7 +130,14 @@ namespace PsychoFlash.Core.Protocol
                 frame[3] = (byte)(id & 0xFF);
             }
             Array.Copy(payload, 0, frame, 4, payload.Length);
-            _device.WriteMessage(frame, TxFlags.ISO15765_FRAME_PAD, ResponseTimeout);
+            return frame;
+        }
+
+        /// <summary>Wraps a service payload in the J2534 CAN identifier header and sends it.</summary>
+        public void SendRaw(byte[] payload)
+        {
+            byte[] frame = BuildFrame(_profile, payload);
+            _device.WriteMessage(frame, TxFlags.ISO15765_FRAME_PAD, WriteTimeout);
         }
 
         /// <summary>
@@ -136,10 +155,10 @@ namespace PsychoFlash.Core.Protocol
             }
         }
 
-        private byte[] WaitForResponse(byte requestService, int expectedResponseLength)
+        private byte[] WaitForResponse(byte requestService, int minimumResponseLength)
         {
-            int expected = expectedResponseLength > 0 ? expectedResponseLength : 2;
-            List<byte> collected = new List<byte>();
+            int minimum = minimumResponseLength > 0 ? minimumResponseLength : 1;
+            byte[] best = null;
             int silentReads = 0;
 
             for (int attempt = 0; attempt < 60; attempt++)
@@ -168,9 +187,8 @@ namespace PsychoFlash.Core.Protocol
                 if (raw == null || raw.Length < 5)
                 {
                     silentReads++;
-                    // Give up quickly when the PCM never answers, but allow the caller to
-                    // keep a partially assembled multi-frame response.
-                    if (collected.Count > 0) break;
+                    // Give up quickly when the PCM never answers, but hand back whatever we have.
+                    if (best != null) break;
                     if (silentReads >= 3) break;
                     continue;
                 }
@@ -193,11 +211,13 @@ namespace PsychoFlash.Core.Protocol
 
                 if (data[0] != (byte)(requestService + 0x40)) continue;
 
-                collected.AddRange(data);
-                if (collected.Count >= expected) break;
+                // Some drivers hand back a multi-frame answer as several messages. Keep the
+                // longest payload seen instead of concatenating (which would duplicate bytes).
+                if (best == null || data.Length > best.Length) best = data;
+                if (best.Length >= minimum) return best;
             }
 
-            if (collected.Count > 0) return collected.ToArray();
+            if (best != null) return best;
             throw new TimeoutException("No response from the PCM for service 0x" + requestService.ToString("X2") +
                                        ". Check ignition, FEPS supply and the CAN wiring.");
         }
@@ -219,7 +239,7 @@ namespace PsychoFlash.Core.Protocol
         {
             Log("0x10 -> start session 0x" + session.ToString("X2"));
             byte[] p = new byte[] { ServiceDiagnosticSessionControl, session };
-            byte[] r = Request(p, 6);
+            byte[] r = Request(p, 1);
             return r.Length >= 2 && r[0] == 0x50;
         }
 
@@ -227,7 +247,7 @@ namespace PsychoFlash.Core.Protocol
         public void TesterPresent()
         {
             byte[] p = new byte[] { ServiceTestPresent, 0x00 };
-            try { Request(p, 2); }
+            try { Request(p, 1); }
             catch (Exception) { /* tester present is best effort */ }
         }
 
@@ -236,7 +256,7 @@ namespace PsychoFlash.Core.Protocol
         {
             Log("0x85 -> control DTC setting " + (enable ? "on" : "off"));
             byte[] p = new byte[] { ServiceControlDtcSetting, (byte)(enable ? 0x01 : 0x02), 0xFF };
-            byte[] r = Request(p, 3);
+            byte[] r = Request(p, 1);
             return r.Length >= 1 && r[0] == 0xC5;
         }
 
@@ -254,7 +274,7 @@ namespace PsychoFlash.Core.Protocol
         {
             Log("0x11 -> ECU reset 0x" + resetType.ToString("X2"));
             byte[] p = new byte[] { ServiceEcuReset, resetType };
-            byte[] r = Request(p, 2);
+            byte[] r = Request(p, 1);
             return r.Length >= 2 && r[0] == 0x51;
         }
 
@@ -287,7 +307,7 @@ namespace PsychoFlash.Core.Protocol
             }
             Log("     key  = 0x" + key.ToString("X" + (algorithm.KeyLength * 2).ToString(CultureInfo.InvariantCulture)));
 
-            byte[] keyResponse = Request(sendKey, 2);
+            byte[] keyResponse = Request(sendKey, 1);
             bool granted = keyResponse.Length >= 2 && keyResponse[0] == 0x67 && keyResponse[1] == 0x02;
             Log(granted ? "     security access granted" : "     security access refused");
             return granted;
@@ -333,7 +353,7 @@ namespace PsychoFlash.Core.Protocol
             payload[0] = ServiceRequestDownload;
             Array.Copy(_profile.RequestDownloadPayload, 0, payload, 1, _profile.RequestDownloadPayload.Length);
             Log("0x34 -> request download " + BytesToHex(_profile.RequestDownloadPayload));
-            byte[] r = Request(payload, 4);
+            byte[] r = Request(payload, 1);
             return r.Length >= 1 && r[0] == 0x74;
         }
 
@@ -343,15 +363,15 @@ namespace PsychoFlash.Core.Protocol
             byte[] payload = new byte[block.Length + 1];
             payload[0] = ServiceTransferData;
             Array.Copy(block, 0, payload, 1, block.Length);
-            byte[] r = Request(payload, 2);
-            if (r.Length < 2 || r[0] != 0x76) throw new InvalidOperationException("Unexpected response to 0x36 transfer data.");
+            byte[] r = Request(payload, 1);
+            if (r.Length < 1 || r[0] != 0x76) throw new InvalidOperationException("Unexpected response to 0x36 transfer data.");
         }
 
         /// <summary>0x37 - closes the download.</summary>
         public bool TransferExit()
         {
             Log("0x37 -> transfer exit");
-            byte[] r = Request(new byte[] { ServiceTransferExit }, 2);
+            byte[] r = Request(new byte[] { ServiceTransferExit }, 1);
             return r.Length >= 1 && r[0] == 0x77;
         }
 
@@ -359,7 +379,7 @@ namespace PsychoFlash.Core.Protocol
         public bool EraseFlash()
         {
             Log("0xB2 -> erase flash " + BytesToHex(_profile.ErasePayload));
-            byte[] r = Request(_profile.ErasePayload, 4);
+            byte[] r = Request(_profile.ErasePayload, 1);
             // 0xF2 is the positive answer to 0xB2; some PCMs simply stop responding while erasing.
             if (r.Length >= 1 && r[0] == 0xF2) return true;
             return r.Length >= 1 && r[0] == 0xB2 + 0x40;
