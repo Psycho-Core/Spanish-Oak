@@ -87,6 +87,17 @@ Fixed: `FordPcmClient.ExtractReadData` now derives the prefix from the answer le
 layouts work, and a short answer is logged and reported instead of being padded. Covered by four
 self-test cases, including a full size block.
 
+### 7. FEPS was requested in volts instead of millivolts (critical, no unlock possible on a car)
+
+`J2534Device.SetProgrammingVoltage` passed the profile voltage straight to
+`PassThruSetProgrammingVoltage`, which the J2534 API defines in **millivolts**. The tool therefore
+asked every interface for 18 mV instead of 18 V: no programming voltage, no programming session,
+and every unlock refused with `0x33`/`0x22` - on a real car, the tool would not have worked at all,
+and the failure would have looked like a wiring fault.
+
+Found by the simulated PCM in the self test, which asserts the voltage the interface is asked for.
+Fixed by converting to millivolts in the device layer and printing both units in the error message.
+
 ## Contract tests added
 
 `tests/PsychoFlash.SelfTest` now fails the build if any BF Barra constant drifts:

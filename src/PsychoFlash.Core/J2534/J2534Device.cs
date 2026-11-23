@@ -286,8 +286,16 @@ namespace PsychoFlash.Core.J2534
         /// <summary>Drives the Ford FEPS line (18 V) used to put the PCM into programming mode.</summary>
         public void SetProgrammingVoltage(uint pinNumber, uint voltage)
         {
-            J2534Err err = _lib.SetProgrammingVoltage(_deviceId, pinNumber, voltage);
-            if (err != J2534Err.STATUS_NOERROR) throw new J2534Exception("PassThruSetProgrammingVoltage(pin " + pinNumber + ", " + voltage + "V)", err);
+            // The J2534 API takes millivolts (18000 for 18 V), the profiles are written in volts.
+            // Passing volts straight through asks the interface for 18 mV, which is no FEPS at all -
+            // found by the simulated PCM in the self test.
+            uint millivolts = voltage * 1000;
+            J2534Err err = _lib.SetProgrammingVoltage(_deviceId, pinNumber, millivolts);
+            if (err != J2534Err.STATUS_NOERROR)
+            {
+                throw new J2534Exception("PassThruSetProgrammingVoltage(pin " + pinNumber + ", " + voltage + " V / " +
+                                         millivolts + " mV)", err);
+            }
         }
 
         /// <summary>Writes one message; the interface performs ISO-TP segmentation automatically.</summary>

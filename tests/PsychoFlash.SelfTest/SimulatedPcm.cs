@@ -150,9 +150,9 @@ namespace PsychoFlash.SelfTest
                     if (!Unlocked) { Negative(service, 0x33); return; }
                     if (SendResponsePendingOnce && !_pendingSent)
                     {
+                        // A real PCM sends the pending answer and then the real one; both are queued.
                         _pendingSent = true;
                         Negative(service, 0x78);
-                        return;
                     }
                     _downloadAddress = 0x010000;
                     Positive(new byte[] { 0x74, 0x20, 0x00 });
