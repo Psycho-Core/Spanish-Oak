@@ -8,6 +8,7 @@
     <RootNamespace>PsychoFlash.Cli</RootNamespace>
     <Nullable>disable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>1.2.0</Version>
     <Description>PsychoFlash command line interface for Ford EEC-VI (Spanish Oak) PCM flashing.</Description>
   </PropertyGroup>
 

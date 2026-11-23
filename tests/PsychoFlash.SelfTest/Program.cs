@@ -23,6 +23,7 @@ namespace PsychoFlash.SelfTest
             TestSeedParsing();
             TestProfileMapping();
             TestFalconProfileContract();
+            TestAlgorithmBag();
             TestFrameConstruction();
             TestReadResponseFraming();
             TestImageTools();
@@ -150,6 +151,68 @@ namespace PsychoFlash.SelfTest
             for (int i = 0; i < expected.Length; i++)
             {
                 CheckEqual(expected[i], download[i], "request download byte " + i);
+            }
+        }
+
+        /// <summary>
+        /// A keybag is how an unfamiliar PCM gets unlocked without rebuilding the tool: a list of
+        /// candidate constant sets, tried in order. Parsing it is pure text handling, so it is
+        /// pinned here - including that the built-in Falcon line reproduces the known vectors.
+        /// </summary>
+        private static void TestAlgorithmBag()
+        {
+            Console.WriteLine("Keybag of seed/key constant sets");
+
+            IList<ISeedKeyAlgorithm> bag = AlgorithmBag.Parse(AlgorithmBag.DefaultKeybagText());
+            CheckEqual(1, bag.Count, "default keybag has one entry");
+            Check(bag.Count == 1 && bag[0].Name == "falcon-mki", "entry keeps its name");
+            Check(bag.Count == 1 && ((FordSeedKeyMkI)bag[0]).Constants == "08 30 61 A4 C5",
+                  "five constants are readable back as hex");
+            CheckEqual(0x1DADBF, bag[0].ComputeKey(0x123456), "bag entry reproduces the built-in key");
+
+            // Compact form, comments, blank lines and trailing comments.
+            string text = "# name  k0 k1 k2 k3 k4\n" +
+                          "\n" +
+                          "falcon      083061A4C5\n" +
+                          "second      08 30 61 A4 C5   # same constants, different name\n" +
+                          "third       0x00 0xFF 0x12 0x34 0x56\n";
+            IList<ISeedKeyAlgorithm> many = AlgorithmBag.Parse(text);
+            CheckEqual(3, many.Count, "three entries parsed, comments skipped");
+            Check(many.Count == 3 && many[0].Name == "falcon", "compact form keeps order");
+            CheckEqual(0x1DADBF, many[0].ComputeKey(0x123456), "compact form computes the same key");
+            CheckEqual(0x1DADBF, many[1].ComputeKey(0x123456), "spaced form with trailing comment");
+            Check(many.Count == 3 && ((FordSeedKeyMkI)many[2]).Constants == "00 FF 12 34 56",
+                  "0x prefixed constants are accepted");
+
+            // Malformed input must fail loudly - a silently ignored line could skip the one
+            // candidate that would have unlocked the PCM.
+            Check(Throws<FormatException>(delegate { AlgorithmBag.Parse("onlytwo 08 30\n"); }),
+                  "wrong number of fields is rejected");
+            Check(Throws<FormatException>(delegate { AlgorithmBag.Parse("odd 083061A4C\n"); }),
+                  "odd number of hex digits is rejected");
+            Check(Throws<FormatException>(delegate { AlgorithmBag.Parse("bad 08 30 61 A4 ZZ\n"); }),
+                  "non hex constant is rejected");
+
+            // Round trip.
+            IList<ISeedKeyAlgorithm> round = AlgorithmBag.Parse(AlgorithmBag.Format(many));
+            Check(round.Count == many.Count, "Format output parses back to the same count");
+            CheckEqual(many[2].ComputeKey(0xABCDEF), round[2].ComputeKey(0xABCDEF), "round trip keeps the algorithm");
+        }
+
+        private static bool Throws<T>(Action action) where T : Exception
+        {
+            try
+            {
+                action();
+                return false;
+            }
+            catch (T)
+            {
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 

@@ -103,6 +103,18 @@ J2534 message framing
   multi-frame 0x36 frame length 0x405
 ```
 
+## Unlock robustness (added after the audit)
+
+The audit assumed the Falcon constants are the ones every Spanish Oak PCM wants. Two escape
+hatches were added for the case where a PCM answers `0x35` instead (`docs/UNLOCK.md`):
+
+* a **keybag** file of candidate constant sets, tried in order, with lockout (`0x36`/`0x37`)
+  recovery that re-applies FEPS and asks for an ignition cycle instead of giving up;
+* `--feps-pin` / `--feps-voltage`, because the reference tool's pseudo pin `0x80` is not what every
+  interface accepts (Ford's FEPS is OBD pin 13).
+
+Both change only the unlock path - the flashing sequence is untouched.
+
 ## Remaining gaps (documented, not blocking)
 
 1. **No checksum correction.** The 1 MB image is written verbatim. If a changed calibration needs

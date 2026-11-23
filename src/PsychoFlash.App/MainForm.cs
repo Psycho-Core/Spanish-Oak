@@ -481,7 +481,7 @@ namespace PsychoFlash.App
                 _session.Service.EnterProgrammingMode(true);
                 try
                 {
-                    if (!_session.Service.Unlock(_session.KeyAlgorithm))
+                    if (!_session.UnlockPcm())
                     {
                         Log("Security access not granted - cannot verify.");
                         return;
@@ -524,7 +524,7 @@ namespace PsychoFlash.App
                 _session.Service.EnterProgrammingMode(true);
                 try
                 {
-                    bool granted = _session.Service.Unlock(_session.KeyAlgorithm);
+                    bool granted = _session.UnlockPcm();
                     Log(granted ? "Security access granted (PCM unlocked)." : "Security access refused.");
                 }
                 finally

@@ -16,6 +16,13 @@ Tactrix Openport, etc.).
 
 ## New in this release
 
+* **Keybag support** - `--keybag bag.txt` tries candidate seed/key constant sets in order when a
+  PCM refuses the built-in algorithm; `psychoflash keybag --file bag.txt` parses and lists one,
+  `psychoflash seed --seed 123456 --keybag bag.txt` checks candidates offline. See
+  [docs/UNLOCK.md](docs/UNLOCK.md).
+* **`--feps-pin` / `--feps-voltage`** - choose the programming-voltage pin (default `0x80`, the
+  reference tool's value; `13` for interfaces that want the real OBD pin).
+
 * **Read stored trouble codes** - `psychoflash dtcs`, or the *Read codes* button in the GUI.
   No FEPS and no unlock needed, so it works on a car that cranks but will not run.
 * **Clear trouble codes** - `psychoflash dtcs --clear`.

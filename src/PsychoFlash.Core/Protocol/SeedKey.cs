@@ -60,6 +60,16 @@ namespace PsychoFlash.Core.Protocol
         }
 
         public string Name { get { return _name; } }
+
+        /// <summary>The five application constants as "08 30 61 A4 C5" (keybag format).</summary>
+        public string Constants
+        {
+            get
+            {
+                return _k0.ToString("X2") + " " + _k1.ToString("X2") + " " + _k2.ToString("X2") + " " +
+                       _k3.ToString("X2") + " " + _k4.ToString("X2");
+            }
+        }
         public int SeedLength { get { return 3; } }
         public int KeyLength { get { return 3; } }
 

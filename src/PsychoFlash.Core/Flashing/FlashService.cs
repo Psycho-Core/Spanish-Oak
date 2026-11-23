@@ -166,6 +166,75 @@ namespace PsychoFlash.Core.Flashing
             return false;
         }
 
+        /// <summary>
+        /// Tries each algorithm in turn - the "keybag" approach, for a PCM whose application
+        /// constants are not the built-in Falcon set. Returns the algorithm that unlocked the
+        /// PCM, or null when none did.
+        ///
+        /// Each wrong candidate costs the PCM one security attempt (usually 10 before a lockout),
+        /// so a bag is tried in file order and the PCM's own 0x36/0x37 answer stops the run.
+        /// </summary>
+        public ISeedKeyAlgorithm UnlockAny(IList<ISeedKeyAlgorithm> algorithms)
+        {
+            if (algorithms == null || algorithms.Count == 0) return null;
+            int lockouts = 0;
+
+            for (int i = 0; i < algorithms.Count; i++)
+            {
+                ISeedKeyAlgorithm algorithm = algorithms[i];
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    Log("Key candidate " + (i + 1) + " of " + algorithms.Count + ": " + algorithm.Name +
+                        " [" + DescribeConstants(algorithm) + "]");
+                    try
+                    {
+                        if (_client.SecurityAccess(algorithm))
+                        {
+                            Log("Security access granted with " + algorithm.Name + ".");
+                            return algorithm;
+                        }
+                        break; // answered but not granted - next candidate
+                    }
+                    catch (NegativeResponseException ex)
+                    {
+                        if (ex.Code == 0x36 || ex.Code == 0x37)
+                        {
+                            lockouts++;
+                            Log("  PCM locked out: " + ex.Message);
+                            if (lockouts > 3)
+                            {
+                                Log("  giving up - the PCM keeps locking out.");
+                                return null;
+                            }
+                            LeaveProgrammingMode();
+                            if (RequestOperatorAction != null)
+                            {
+                                RequestOperatorAction("PCM locked out after too many keys. Turn the ignition OFF, wait 10 seconds, then ON again.");
+                            }
+                            Thread.Sleep(1000);
+                            EnterProgrammingMode(false);
+                            continue; // retry the same candidate
+                        }
+                        Log("  rejected: " + ex.Message);
+                        break; // wrong key for this candidate
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        Log("  no answer: " + ex.Message);
+                        break;
+                    }
+                }
+            }
+            Log("No key candidate was accepted.");
+            return null;
+        }
+
+        private static string DescribeConstants(ISeedKeyAlgorithm algorithm)
+        {
+            FordSeedKeyMkI ford = algorithm as FordSeedKeyMkI;
+            return ford == null ? algorithm.GetType().Name : ford.Constants;
+        }
+
         /// <summary>Erases the flash memory (0xB2 0xAA) and waits for the PCM to settle.</summary>
         public void Erase(IProgress<FlashProgress> progress, CancellationToken token)
         {

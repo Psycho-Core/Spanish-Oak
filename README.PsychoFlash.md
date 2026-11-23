@@ -30,7 +30,10 @@ still have to provide.
 * **Battery voltage** displayed and checked before every erase/write.
 * Ford **FEPS 18 V** programming voltage with an operator prompt for the ignition cycle.
 * Pluggable **seed/key** algorithms (`ISeedKeyAlgorithm`); the Falcon Spanish Oak algorithm
-  ships built in and is covered by test vectors.
+  ships built in and is covered by test vectors. When a PCM refuses it, a **keybag** file of
+  candidate constants can be tried in order - see [docs/UNLOCK.md](docs/UNLOCK.md).
+* **`--feps-pin` / `--feps-voltage`** overrides, for interfaces that want the real OBD pin 13
+  instead of the reference tool's `0x80`.
 * Any J2534 v04.04 interface: OBDX Pro FT, Tactrix Openport, Ford VCM II, ... The DLL is
   discovered from `HKLM\SOFTWARE\PassThruSupport.04.04` or passed explicitly.
 * No licence server, no dongle, no telemetry.
@@ -101,6 +104,7 @@ psychoflash dtcs                           # stored fault codes (0x19), works on
 psychoflash dtcs --clear                   # wipe them (0x14)
 psychoflash vin                            # VIN from the PCM (0x22 F190)
 psychoflash seed --seed 6A3F12             # offline key calculation (no hardware)
+psychoflash keybag --file bag.txt          # parse/list seed-key constant sets
 ```
 
 Options: `--dll <path>` (explicit J2534 DLL), `--device <name>`, `--profile falcon|blackoak`,

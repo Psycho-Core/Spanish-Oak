@@ -24,6 +24,30 @@ namespace PsychoFlash.Core.Flashing
         public PcmProfile Profile { get; private set; }
         public ISeedKeyAlgorithm KeyAlgorithm { get; set; }
 
+        /// <summary>
+        /// Optional list of key candidates to try, in order, when the PCM refuses the built-in
+        /// algorithm (see <see cref="AlgorithmBag"/>). Empty means "use <see cref="KeyAlgorithm"/>".
+        /// </summary>
+        public IList<ISeedKeyAlgorithm> KeyAlgorithms { get; set; }
+
+        /// <summary>
+        /// Unlocks the PCM with <see cref="KeyAlgorithms"/> when one is configured, otherwise with
+        /// the single <see cref="KeyAlgorithm"/>. On success the algorithm that worked is kept in
+        /// <see cref="KeyAlgorithm"/> so the log and the next operation stay consistent.
+        /// </summary>
+        public bool UnlockPcm()
+        {
+            if (_service == null) throw new InvalidOperationException("Not connected.");
+            if (KeyAlgorithms != null && KeyAlgorithms.Count > 0)
+            {
+                ISeedKeyAlgorithm used = _service.UnlockAny(KeyAlgorithms);
+                if (used == null) return false;
+                KeyAlgorithm = used;
+                return true;
+            }
+            return _service.Unlock(KeyAlgorithm);
+        }
+
         public Action<string> OperatorPrompt { get; set; }
 
         public FlashSession()
@@ -75,7 +99,7 @@ namespace PsychoFlash.Core.Flashing
             _service.EnterProgrammingMode(true);
             try
             {
-                if (!_service.Unlock(KeyAlgorithm))
+                if (!UnlockPcm())
                 {
                     throw new InvalidOperationException("The PCM did not grant security access. Nothing was written.");
                 }
@@ -145,7 +169,7 @@ namespace PsychoFlash.Core.Flashing
             _service.EnterProgrammingMode(true);
             try
             {
-                if (!_service.Unlock(KeyAlgorithm))
+                if (!UnlockPcm())
                 {
                     throw new InvalidOperationException("The PCM did not grant security access. The read was aborted.");
                 }
