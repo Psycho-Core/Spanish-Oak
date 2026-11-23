@@ -136,16 +136,26 @@ namespace PsychoFlash.Core.Flashing
                 {
                     int size = attempt == 0 ? 2 : 4;
 
+                    // A checksum field can contain changed bytes anywhere inside it - often only the
+                    // low half moves - so every word that *contains* a changed byte is a candidate,
+                    // not just the changed byte itself.
+                    SortedSet<int> candidates = new SortedSet<int>();
+                    for (int c = 0; c < changed.Count; c++)
+                    {
+                        for (int delta = 0; delta < size; delta++)
+                        {
+                            int start = changed[c] - delta;
+                            if (start >= 0 && start + size <= length) candidates.Add(start);
+                        }
+                    }
+
                     for (int scheme = 0; scheme < 3; scheme++)
                     {
                         uint expectStock = stockValues[scheme] & (size == 2 ? 0xFFFFu : 0xFFFFFFFFu);
                         uint expectModified = modifiedValues[scheme] & (size == 2 ? 0xFFFFu : 0xFFFFFFFFu);
 
-                        for (int c = 0; c < changed.Count; c++)
+                        foreach (int offset in candidates)
                         {
-                            int offset = changed[c];
-                            if (offset + size > length) continue;
-
                             for (int order = 0; order < 2; order++)
                             {
                                 bool bigEndian = order == 0;
