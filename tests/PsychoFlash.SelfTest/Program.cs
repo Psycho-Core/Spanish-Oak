@@ -292,7 +292,10 @@ namespace PsychoFlash.SelfTest
             {
                 FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
                 Check(client.EraseFlash(), "0xF2 alone is a complete erase answer");
-                Check(client.TransferData(new byte[4]), "0x76 alone acknowledges a data block");
+                bool transferred = true;
+                try { client.TransferData(new byte[4]); }
+                catch (Exception ex) { transferred = false; Console.WriteLine("    transfer data threw: " + ex.Message); }
+                Check(transferred, "0x76 alone acknowledges a data block");
                 Check(client.TransferExit(), "0x77 alone is a complete transfer exit answer");
             }
         }
