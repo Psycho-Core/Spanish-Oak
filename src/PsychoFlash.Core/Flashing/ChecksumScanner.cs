@@ -144,8 +144,8 @@ namespace PsychoFlash.Core.Flashing
                     {
                         for (int delta = 0; delta < size; delta++)
                         {
-                            int start = changed[c] - delta;
-                            if (start >= 0 && start + size <= length) candidates.Add(start);
+                            int wordStart = changed[c] - delta;
+                            if (wordStart >= 0 && wordStart + size <= length) candidates.Add(wordStart);
                         }
                     }
 
