@@ -70,6 +70,11 @@ namespace PsychoFlash.Cli
                         return ReadVin();
                     case "keybag":
                         return Keybag(parsed);
+                    case "unlock":
+                        return Unlock(parsed);
+                    case "diagnose":
+                    case "check":
+                        return Diagnose();
                     default:
                         Console.Error.WriteLine("Unknown command '" + command + "'.");
                         PrintUsage();
@@ -105,6 +110,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  vin                        Read the VIN from the PCM (0x22 F190)");
             Console.WriteLine("  seed  --seed <AABBCC>      Compute the 0x27 key for a seed (no hardware needed)");
             Console.WriteLine("  keybag --file <bag.txt>    Parse and list a keybag of seed/key constant sets");
+            Console.WriteLine("  unlock [--seed-only]       Apply FEPS, read the seed, run 0x27 (nothing is written)");
+            Console.WriteLine("  diagnose                   Read-only health check: interface, battery, seed, VIN, codes");
             Console.WriteLine();
             Console.WriteLine("Options");
             Console.WriteLine("  --dll <path>               J2534 driver DLL (default: first interface in the registry)");
@@ -123,6 +130,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  psychoflash seed  --seed 6A3F12");
             Console.WriteLine("  psychoflash dtcs");
             Console.WriteLine("  psychoflash dtcs --clear");
+            Console.WriteLine("  psychoflash diagnose");
+            Console.WriteLine("  psychoflash unlock --seed-only");
             Console.WriteLine("  psychoflash keybag --file keybag.txt");
             Console.WriteLine("  psychoflash read --out stock.bin --keybag keybag.txt");
         }
@@ -198,6 +207,122 @@ namespace PsychoFlash.Cli
                 Console.WriteLine("      DLL: " + reg.FunctionLibrary);
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Unlock test: FEPS, programming session, seed, key. Nothing is erased or written, so
+        /// this is the safe way to answer "can I unlock this PCM?".
+        /// </summary>
+        private static int Unlock(Dictionary<string, string> parsed)
+        {
+            using (FlashSession session = CreateSession(true))
+            {
+                session.Service.EnterProgrammingMode(true);
+                try
+                {
+                    uint seed = session.Service.ReadSeedOnly(session.KeyAlgorithm);
+                    Console.WriteLine("Seed       : 0x" + seed.ToString("X6"));
+
+                    if (parsed.ContainsKey("seed-only"))
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("Seed read only - no key was sent, so no security attempt was used.");
+                        Console.WriteLine("Check the key offline with: psychoflash seed --seed " + seed.ToString("X6"));
+                        return 0;
+                    }
+
+                    if (!session.UnlockPcm())
+                    {
+                        Console.Error.WriteLine();
+                        Console.Error.WriteLine("Unlock refused. Read docs/UNLOCK.md:");
+                        Console.Error.WriteLine("  0x35 invalid key        -> wrong constants, try --keybag <file>");
+                        Console.Error.WriteLine("  0x36/0x37 lockout       -> ignition OFF, wait 10 s, ON again");
+                        Console.Error.WriteLine("  0x33/0x22 denied        -> FEPS or session problem, try --feps-pin 13");
+                        return 1;
+                    }
+                    Console.WriteLine("Unlocked with: " + session.KeyAlgorithm.Name);
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("Unlock test failed: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    session.Service.LeaveProgrammingMode();
+                }
+            }
+        }
+
+        /// <summary>Read-only health check - every step reports and continues, nothing is written.</summary>
+        private static int Diagnose()
+        {
+            int failures = 0;
+            using (FlashSession session = CreateSession(true))
+            {
+                Console.WriteLine("Interface : firmware " + session.Device.FirmwareVersion + ", DLL " + session.Device.DllVersion +
+                                  ", API " + session.Device.ApiVersion);
+
+                try
+                {
+                    double volts = session.ReadBatteryVoltage();
+                    Console.WriteLine("Battery   : " + volts.ToString("0.00") + " V" +
+                                      (volts < 11.8 ? "  (LOW - connect a charger before flashing)" : string.Empty));
+                }
+                catch (Exception ex)
+                {
+                    failures++;
+                    Console.WriteLine("Battery   : FAILED - " + ex.Message);
+                }
+
+                session.Service.EnterProgrammingMode(true);
+                try
+                {
+                    try
+                    {
+                        uint seed = session.Service.ReadSeedOnly(session.KeyAlgorithm);
+                        Console.WriteLine("Seed (27) : 0x" + seed.ToString("X6") + "  - PCM is answering");
+                    }
+                    catch (Exception ex)
+                    {
+                        failures++;
+                        Console.WriteLine("Seed (27) : FAILED - " + ex.Message);
+                        Console.WriteLine("            Is the ignition ON and FEPS applied? Try --feps-pin 13.");
+                    }
+
+                    try
+                    {
+                        string vin = session.ReadVin();
+                        if (string.IsNullOrEmpty(vin)) Console.WriteLine("VIN       : not readable (normal on a locked PCM)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("VIN       : " + ex.Message);
+                    }
+
+                    try
+                    {
+                        IList<DiagnosticCode> codes = session.ReadCodes();
+                        Console.WriteLine("Codes     : " + codes.Count + " stored");
+                        foreach (DiagnosticCode code in codes) Console.WriteLine("            " + code);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Codes     : " + ex.Message);
+                    }
+                }
+                finally
+                {
+                    session.Service.LeaveProgrammingMode();
+                }
+            }
+
+            Console.WriteLine();
+            Console.WriteLine(failures == 0
+                ? "Health check passed - the tool can talk to this PCM."
+                : failures + " health check step(s) failed.");
+            return failures == 0 ? 0 : 1;
         }
 
         private static int Keybag(Dictionary<string, string> parsed)

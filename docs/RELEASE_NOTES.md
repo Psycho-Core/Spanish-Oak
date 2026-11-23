@@ -16,6 +16,11 @@ Tactrix Openport, etc.).
 
 ## New in this release
 
+* **`psychoflash diagnose`** - read-only health check: interface versions, battery voltage, seed,
+  VIN and stored codes. Nothing is written, nothing is erased.
+* **`psychoflash unlock [--seed-only]`** - tests `0x27` without flashing anything. `--seed-only`
+  reads the seed without sending a key, so it spends none of the PCM's security attempts.
+
 * **Keybag support** - `--keybag bag.txt` tries candidate seed/key constant sets in order when a
   PCM refuses the built-in algorithm; `psychoflash keybag --file bag.txt` parses and lists one,
   `psychoflash seed --seed 123456 --keybag bag.txt` checks candidates offline. See

@@ -367,6 +367,18 @@ namespace PsychoFlash.Core.Protocol
         }
 
         /// <summary>
+        /// 0x27/0x01 - reads the seed <b>without</b> sending a key. Costs no security attempts, so
+        /// it is the safe way to find out whether the PCM is talking and what it seeds with.
+        /// </summary>
+        public byte[] RequestSeed(int seedLength)
+        {
+            Log("0x27 -> request seed (no key will be sent)");
+            byte[] r = Request(new byte[] { ServiceSecurityAccess, 0x01 }, 2 + seedLength);
+            if (r.Length >= 2 && r[0] == 0x67) return r;
+            throw new InvalidOperationException("Unexpected response to 0x27/0x01 read.");
+        }
+
+        /// <summary>
         /// 0x19/0x02 - reads every stored trouble code, filtered by the status mask 0xFF.
         /// Needs no programming session, FEPS or security access: key on is enough.
         /// </summary>

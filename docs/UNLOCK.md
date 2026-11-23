@@ -35,6 +35,21 @@ random seeds against an emulation of the original IL, and 1012 checks in the Pyt
 So `0x35` is the only NRC that means "your key generator is wrong". Everything else is a
 sequencing or wiring problem, and retrying with another keybag candidate will not help.
 
+## Checking before you spend an attempt
+
+`0x27/0x01` (read the seed) does **not** count against the PCM's attempts; only a wrong key does.
+So the safe sequence on an unknown car is:
+
+```console
+psychoflash diagnose              # interface, battery, seed, VIN, stored codes - nothing written
+psychoflash unlock --seed-only    # prints the seed and the key we would send, sends neither key
+psychoflash seed --seed 123456    # recompute/compare the key offline
+psychoflash unlock                # only now spend an attempt
+```
+
+If `diagnose` reports the seed line as failed, the problem is FEPS or the session, not the key -
+try `--feps-pin 13` before anything else.
+
 ## Escape hatch 1: a keybag
 
 A keybag is a plain text file of candidate constant sets, tried in order:

@@ -24,6 +24,8 @@ still have to provide.
   transfer exit (`37`), optional read-back verification.
 * **Erase** only, for recovery after an interrupted flash.
 * **Verify** the PCM contents against a file.
+* **`unlock --seed-only`** - reads the seed without sending a key, so you can check the key
+  offline (`psychoflash seed`) before spending any of the PCM's security attempts.
 * **Read and clear stored fault codes** (`0x19` / `0x14`) - no FEPS needed, so it works on a car
   that will not start. See [docs/SWAP.md](docs/SWAP.md) for what each code means in a conversion.
 * **VIN** readout (`0x22 F190`).
@@ -104,6 +106,8 @@ psychoflash dtcs                           # stored fault codes (0x19), works on
 psychoflash dtcs --clear                   # wipe them (0x14)
 psychoflash vin                            # VIN from the PCM (0x22 F190)
 psychoflash seed --seed 6A3F12             # offline key calculation (no hardware)
+psychoflash diagnose                       # read-only health check: interface, battery, seed, VIN, codes
+psychoflash unlock --seed-only             # read the seed without spending an unlock attempt
 psychoflash keybag --file bag.txt          # parse/list seed-key constant sets
 ```
 

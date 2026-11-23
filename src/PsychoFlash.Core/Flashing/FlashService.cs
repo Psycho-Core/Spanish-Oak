@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
@@ -164,6 +165,28 @@ namespace PsychoFlash.Core.Flashing
                 Thread.Sleep(500);
             }
             return false;
+        }
+
+        /// <summary>
+        /// Reads the seed and logs the key we <i>would</i> send, without sending it. Nothing is
+        /// consumed: the PCM does not count a seed request against the security attempts. Use it
+        /// to confirm communication, to collect the seed for offline analysis, or to compare
+        /// against a pair from another tool.
+        /// </summary>
+        public uint ReadSeedOnly(ISeedKeyAlgorithm algorithm)
+        {
+            if (algorithm == null) throw new ArgumentNullException("algorithm");
+            byte[] response = _client.RequestSeed(algorithm.SeedLength);
+            uint seed = 0;
+            for (int i = 0; i < algorithm.SeedLength && 2 + i < response.Length; i++)
+            {
+                seed = (seed << 8) | response[2 + i];
+            }
+            uint key = algorithm.ComputeKey(seed);
+            Log("     seed = 0x" + seed.ToString("X" + (algorithm.SeedLength * 2).ToString(CultureInfo.InvariantCulture)) +
+                "   key would be 0x" + key.ToString("X" + (algorithm.KeyLength * 2).ToString(CultureInfo.InvariantCulture)) +
+                "   (no attempt used)");
+            return seed;
         }
 
         /// <summary>
