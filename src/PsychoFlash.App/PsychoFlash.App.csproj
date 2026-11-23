@@ -12,7 +12,7 @@
     <Product>PsychoFlash</Product>
     <AssemblyTitle>PsychoFlash - Ford EEC-VI / Spanish Oak PCM Flasher</AssemblyTitle>
     <Description>Read, write and erase the flash memory of Ford EEC-VI (Spanish Oak 1024k) PCMs over SAE J2534.</Description>
-    <Version>1.6.0</Version>
+    <Version>1.7.0</Version>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
