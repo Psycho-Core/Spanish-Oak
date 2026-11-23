@@ -74,12 +74,12 @@ namespace PsychoFlash.Core.Protocol
         public const byte ServiceControlDtcSetting = 0x85;
         public const byte ServiceEraseFlash = 0xB2;
 
-        private readonly J2534Device _device;
+        private readonly IPassThruDevice _device;
         private readonly PcmProfile _profile;
         private readonly Action<string> _log;
         private readonly object _sync = new object();
 
-        public FordPcmClient(J2534Device device, PcmProfile profile, Action<string> log)
+        public FordPcmClient(IPassThruDevice device, PcmProfile profile, Action<string> log)
         {
             if (device == null) throw new ArgumentNullException("device");
             if (profile == null) throw new ArgumentNullException("profile");
@@ -89,7 +89,7 @@ namespace PsychoFlash.Core.Protocol
         }
 
         public PcmProfile Profile { get { return _profile; } }
-        public J2534Device Device { get { return _device; } }
+        public IPassThruDevice Device { get { return _device; } }
 
         /// <summary>Default per-request timeout in milliseconds (response pending restarts it).</summary>
         public uint ResponseTimeout { get; set; } = 2000;

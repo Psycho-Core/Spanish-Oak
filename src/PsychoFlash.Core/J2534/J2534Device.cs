@@ -9,7 +9,7 @@ namespace PsychoFlash.Core.J2534
     /// Friendly wrapper around a J2534 interface: opens the device, brings up an ISO15765
     /// (CAN) channel, programs the message filter and exposes blocking read/write helpers.
     /// </summary>
-    public sealed class J2534Device : IDisposable
+    public sealed class J2534Device : IPassThruDevice
     {
         private readonly J2534Library _lib;
         private uint _deviceId;

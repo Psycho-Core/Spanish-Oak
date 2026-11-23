@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using PsychoFlash.Core.Flashing;
 using PsychoFlash.Core.Protocol;
+using PsychoFlash.Core.J2534;
 
 namespace PsychoFlash.SelfTest
 {
@@ -29,6 +30,7 @@ namespace PsychoFlash.SelfTest
             TestImageTools();
             TestImageDiffAndChecksums();
             TestChecksumDiscovery();
+            TestEndToEnd();
             TestObdPids();
             TestDiagnosticCodes();
             TestNegativeResponseCodes();
@@ -475,6 +477,115 @@ namespace PsychoFlash.SelfTest
             data[offset + 1] = (byte)(value >> 16);
             data[offset + 2] = (byte)(value >> 8);
             data[offset + 3] = (byte)value;
+        }
+
+        /// <summary>
+        /// The whole tool against a simulated PCM: unlock, dump, flash, verify, codes, live data.
+        ///
+        /// This is what "tested without a car" means here. The real client, service and framing code
+        /// run unchanged against an in-memory PCM that speaks the recovered protocol and enforces
+        /// FEPS, security access and block transfer. It does not prove the PCM on your bench behaves
+        /// the same way - it proves the software does what it says when something answers correctly.
+        /// </summary>
+        private static void TestEndToEnd()
+        {
+            Console.WriteLine("End to end against a simulated PCM");
+
+            PcmProfile profile = PcmProfile.SpanishOakFalcon();
+            profile.EraseSettleMilliseconds = 5;          // keep the self test quick
+
+            SimulatedPcm pcm = new SimulatedPcm();
+            List<string> log = new List<string>();
+            FordPcmClient client = new FordPcmClient(pcm, profile, delegate(string m) { log.Add(m); });
+            FlashService service = new FlashService(client, delegate(string m) { log.Add(m); });
+
+            // --- programming mode needs FEPS, and says so when it is missing ---
+            Check(!pcm.ProgrammingVoltageApplied, "no FEPS before programming mode");
+            service.EnterProgrammingMode(false);
+            Check(pcm.ProgrammingVoltageApplied, "FEPS applied on entering programming mode");
+            Check(pcm.AppliedVoltage == profile.ProgrammingVoltage * 1000, "FEPS applied at the profile voltage");
+
+            // --- unlock, with the real key algorithm against the real seed ---
+            Check(service.Unlock(SeedKeyAlgorithms.FordSpanishOak), "unlock accepted by the simulated PCM");
+            Check(pcm.Unlocked, "PCM reports itself unlocked");
+
+            // --- dump, byte for byte ---
+            byte[] stock = service.ReadImage(null, System.Threading.CancellationToken.None);
+            CheckEqual(SimulatedPcm.ImageSize, stock.Length, "dump is exactly 1 MB");
+            Check(SameBytes(stock, pcm.Flash), "dump matches the simulated flash byte for byte");
+            Check(SameBytes(stock, pcm.Flash), "and no byte is shifted (pattern is position dependent)");
+
+            // --- the legacy read layout must produce the same image ---
+            pcm.LegacyReadPrefix = true;
+            byte[] stock2 = service.ReadImage(null, System.Threading.CancellationToken.None);
+            Check(SameBytes(stock, stock2), "both 0x23 response layouts produce an identical dump");
+            pcm.LegacyReadPrefix = false;
+
+            // --- write a modified image, the way a tune would ---
+            byte[] tuned = new byte[stock.Length];
+            Array.Copy(stock, tuned, stock.Length);
+            tuned[0x020000] = 0x12;
+            tuned[0x080000] = 0x34;
+            tuned[0x0FFFFF] = 0x56;
+
+            service.WriteImage(tuned, null, System.Threading.CancellationToken.None);
+            Check(pcm.BlocksTransferred == (0x0F0000 / profile.WriteBlockSize),
+                  "every block of the write window was transferred (" + pcm.BlocksTransferred + ")");
+            CheckEqual(0, FirstDifference(pcm.Flash, tuned, 0x010000, 0x0F0000), "flashed bytes match the file");
+            CheckEqual(0xFF, pcm.Flash[0x000000], "boot block was erased but never written");
+
+            // --- verify catches a match and a mismatch ---
+            CheckEqual(0, service.VerifyImage(tuned, null, System.Threading.CancellationToken.None), "verify passes on the file just flashed");
+            byte[] tampered = new byte[tuned.Length];
+            Array.Copy(tuned, tampered, tuned.Length);
+            tampered[0x050000] ^= 0xFF;
+            Check(service.VerifyImage(tampered, null, System.Threading.CancellationToken.None) > 0, "verify reports differing bytes");
+
+            // --- diagnostics through the same transport ---
+            IList<DiagnosticCode> codes = DiagnosticCodes.Parse(client.ReadTroubleCodes());
+            CheckEqual(2, codes.Count, "trouble codes read from the PCM");
+            Check(codes.Count == 2 && codes[0].Code == "P0123" && codes[1].Code == "P1260", "codes decoded end to end");
+
+            byte[] rpm = client.ReadPid(0x0C);
+            Check(rpm != null && ObdPids.Format(0x0C, rpm) == "1000 rpm", "live data decoded end to end");
+
+            string vin = client.ReadVehicleIdentification();
+            Check(vin == "6FPAAAJGSW4A12345", "VIN read end to end");
+
+            // --- and it refuses politely when the key is wrong ---
+            SimulatedPcm strict = new SimulatedPcm();
+            strict.SetProgrammingVoltage(profile.ProgrammingPin, profile.ProgrammingVoltage);
+            FordPcmClient wrong = new FordPcmClient(strict, profile, delegate { });
+            bool refused = false;
+            try
+            {
+                wrong.SecurityAccess(new FordSeedKeyMkI(0x00, 0x00, 0x00, 0x00, 0x00, "deliberately wrong"));
+            }
+            catch (NegativeResponseException ex)
+            {
+                refused = ex.Code == 0x35;
+            }
+            Check(refused, "a wrong key raises NRC 0x35 rather than being reported as success");
+
+            service.LeaveProgrammingMode();
+            Check(!pcm.ProgrammingVoltageApplied, "FEPS removed on leaving programming mode");
+            Check(log.Count > 10, "the log recorded the session (" + log.Count + " lines)");
+        }
+
+        private static bool SameBytes(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
+        }
+
+        private static int FirstDifference(byte[] a, byte[] b, int offset, int length)
+        {
+            for (int i = offset; i < offset + length && i < a.Length && i < b.Length; i++)
+            {
+                if (a[i] != b[i]) return i;
+            }
+            return 0;
         }
 
         private static void TestNegativeResponseCodes()
