@@ -62,6 +62,7 @@ namespace PsychoFlash.Core.Protocol
         public const byte ServiceDiagnosticSessionControl = 0x10;
         public const byte ServiceEcuReset = 0x11;
         public const byte ServiceClearDiagnosticInformation = 0x14;
+        public const byte ServiceReadDtcInformation = 0x19;
         public const byte ServiceReadDataByIdentifier = 0x22;
         public const byte ServiceReadMemoryByAddress = 0x23;
         public const byte ServiceSecurityAccess = 0x27;
@@ -363,6 +364,21 @@ namespace PsychoFlash.Core.Protocol
             byte[] data = new byte[available];
             Array.Copy(response, start, data, 0, available);
             return data;
+        }
+
+        /// <summary>
+        /// 0x19/0x02 - reads every stored trouble code, filtered by the status mask 0xFF.
+        /// Needs no programming session, FEPS or security access: key on is enough.
+        /// </summary>
+        public byte[] ReadTroubleCodes()
+        {
+            Log("0x19 -> read trouble codes (status mask 0xFF)");
+            byte[] r = Request(new byte[] { ServiceReadDtcInformation, 0x02, 0xFF }, 1);
+            if (r.Length < 1 || r[0] != 0x59)
+            {
+                throw new InvalidOperationException("Unexpected response to 0x19 read.");
+            }
+            return r;
         }
 
         /// <summary>0x22 - reads a data identifier, e.g. 0xF190 for the VIN.</summary>

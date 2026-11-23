@@ -14,6 +14,15 @@ Tactrix Openport, etc.).
 | `PsychoFlash-net8.0-windows.zip` | Framework dependent build for .NET 8 desktop. |
 | `psychoflash-cli-net8.0.zip` | Command line version for scripting and batch work. |
 
+## New in this release
+
+* **Read stored trouble codes** - `psychoflash dtcs`, or the *Read codes* button in the GUI.
+  No FEPS and no unlock needed, so it works on a car that cranks but will not run.
+* **Clear trouble codes** - `psychoflash dtcs --clear`.
+* **VIN readout** - `psychoflash vin`.
+* `docs/SWAP.md`: what a Barra-into-something conversion still needs (PATS, checksums, FPDM,
+  drive-by-wire) and what each no-start code means.
+
 ## Requirements
 
 * Windows 10/11 (x64).
@@ -34,6 +43,9 @@ Tactrix Openport, etc.).
 
 ```
 psychoflash interfaces
+psychoflash info
+psychoflash vin
+psychoflash dtcs
 psychoflash info --in falcon-stock.bin
 psychoflash read --out backup.bin --yes
 psychoflash write --in tuned.bin --verify --yes

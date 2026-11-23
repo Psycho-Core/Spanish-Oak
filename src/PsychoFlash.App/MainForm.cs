@@ -34,6 +34,7 @@ namespace PsychoFlash.App
         private Button _verifyButton;
         private Button _unlockButton;
         private Button _batteryButton;
+        private Button _codesButton;
         private CheckBox _verifyAfterWrite;
         private ProgressBar _progress;
         private Label _progressLabel;
@@ -111,6 +112,13 @@ namespace PsychoFlash.App
             _batteryButton = MakeButton("Measure", new Point(220, 82), new Size(76, 24), Color.FromArgb(60, 60, 66));
             _batteryButton.Click += delegate { MeasureBattery(); };
             device.Controls.Add(_batteryButton);
+
+            // Diagnostic trouble codes: key on is enough, no FEPS and no programming session, so
+            // this is the button to press when the engine will not run.
+            _codesButton = MakeButton("Read codes", new Point(306, 82), new Size(110, 24), Color.FromArgb(60, 60, 66));
+            _codesButton.Click += delegate { ReadCodes(); };
+            device.Controls.Add(_codesButton);
+
             Controls.Add(device);
 
             GroupBox pcm = MakeGroup("PCM", new Point(634, 78), new Size(320, 130));
@@ -321,6 +329,7 @@ namespace PsychoFlash.App
             _verifyButton.Enabled = enabled;
             _unlockButton.Enabled = enabled;
             _batteryButton.Enabled = enabled;
+            _codesButton.Enabled = enabled;
             _profileCombo.Enabled = !connected;
             _interfaceCombo.Enabled = !connected;
             _refreshButton.Enabled = !connected;
@@ -346,6 +355,7 @@ namespace PsychoFlash.App
             _verifyButton.Enabled = enabled && _session != null;
             _unlockButton.Enabled = enabled && _session != null;
             _batteryButton.Enabled = enabled && _session != null;
+            _codesButton.Enabled = enabled && _session != null;
             _readButton.Enabled = enabled && _session != null;
             if (!busy)
             {
@@ -381,6 +391,15 @@ namespace PsychoFlash.App
             {
                 Log("Could not read battery voltage: " + ex.Message);
             }
+        }
+
+        private void ReadCodes()
+        {
+            if (_session == null) return;
+            RunBackground("Reading trouble codes", delegate(CancellationToken token, Progress<FlashProgress> progress)
+            {
+                _session.ReadCodes();
+            });
         }
 
         private void ReadVin()

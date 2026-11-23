@@ -26,6 +26,7 @@ namespace PsychoFlash.SelfTest
             TestFrameConstruction();
             TestReadResponseFraming();
             TestImageTools();
+            TestDiagnosticCodes();
             TestNegativeResponseCodes();
 
             Console.WriteLine();
@@ -230,6 +231,58 @@ namespace PsychoFlash.SelfTest
 
             IList<string> limited = ImageTools.FindPrintableStrings(mixed, 4, 1);
             Check(limited.Count == 1, "string limit is honoured");
+        }
+
+        /// <summary>
+        /// The 0x19 answer is decoded without hardware, so the parser is pinned here. A dump of
+        /// the codes is the first thing to look at when a swapped engine cranks but will not run.
+        /// </summary>
+        private static void TestDiagnosticCodes()
+        {
+            Console.WriteLine("Diagnostic trouble codes (0x19)");
+
+            Check(FordPcmClient.ServiceReadDtcInformation == 0x19, "0x19 is the read DTC service");
+
+            Check(DiagnosticCodes.Format(0x01, 0x23) == "P0123", "P0123 decoding");
+            Check(DiagnosticCodes.Format(0x03, 0x45) == "P0345", "P0345 decoding");
+            Check(DiagnosticCodes.Format(0x41, 0x00) == "C0100", "C0100 decoding");
+            Check(DiagnosticCodes.Format(0x81, 0x00) == "B0100", "B0100 decoding");
+            Check(DiagnosticCodes.Format(0xC1, 0x00) == "U0100", "U0100 decoding");
+
+            // 59 02 FF | P0123 ftb 45 status 0x07 (test failed, not confirmed)
+            //           | P1260 ftb 00 status 0x08 (confirmed, not current)
+            byte[] answer = new byte[]
+            {
+                0x59, 0x02, 0xFF,
+                0x01, 0x23, 0x45, 0x07,
+                0x12, 0x60, 0x00, 0x08
+            };
+            IList<DiagnosticCode> codes = DiagnosticCodes.Parse(answer);
+            CheckEqual(2, codes.Count, "two codes decoded");
+            Check(codes.Count == 2 && codes[0].Code == "P0123", "first code is P0123");
+            Check(codes.Count == 2 && codes[0].IsCurrent, "P0123 flagged as present");
+            Check(codes.Count == 2 && !codes[0].IsConfirmed, "P0123 not flagged as confirmed");
+            Check(codes.Count == 2 && codes[1].Code == "P1260", "second code is P1260");
+            Check(codes.Count == 2 && codes[1].Description.Contains("theft"), "P1260 describes the PATS lockout");
+            Check(codes.Count == 2 && codes[1].IsConfirmed && !codes[1].IsCurrent, "P1260 confirmed but not current");
+
+            // No codes: the answer is just the header.
+            IList<DiagnosticCode> none = DiagnosticCodes.Parse(new byte[] { 0x59, 0x02, 0xFF });
+            CheckEqual(0, none.Count, "header only means no codes");
+
+            // Junk in, nothing out (no exception).
+            CheckEqual(0, DiagnosticCodes.Parse(new byte[0]).Count, "empty answer yields no codes");
+            CheckEqual(0, DiagnosticCodes.Parse(null).Count, "null answer yields no codes");
+            CheckEqual(0, DiagnosticCodes.Parse(new byte[] { 0x58, 0x02, 0xFF, 0x01, 0x23, 0x45, 0x2F }).Count,
+                       "wrong service byte is rejected");
+
+            // A trailing partial record is ignored, not thrown.
+            byte[] padded = new byte[] { 0x59, 0x02, 0xFF, 0x01, 0x23, 0x45, 0x2F, 0x00, 0x00 };
+            CheckEqual(1, DiagnosticCodes.Parse(padded).Count, "trailing partial record is ignored");
+
+            Check(DiagnosticCodes.Describe("P0335").Contains("crankshaft"), "P0335 describes the crank sensor");
+            Check(DiagnosticCodes.Describe("P2101").Contains("throttle"), "P2101 describes the throttle actuator");
+            Check(DiagnosticCodes.Describe("Z9999").Length == 0, "unknown code has no description");
         }
 
         private static void TestNegativeResponseCodes()

@@ -57,6 +57,11 @@ namespace PsychoFlash.Cli
                         return Erase();
                     case "verify":
                         return Verify(parsed);
+                    case "dtcs":
+                    case "codes":
+                        return ReadCodes(parsed);
+                    case "vin":
+                        return ReadVin();
                     default:
                         Console.Error.WriteLine("Unknown command '" + command + "'.");
                         PrintUsage();
@@ -88,6 +93,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  write --in  <file.bin>     Erase and program a flash image");
             Console.WriteLine("  verify --in <file.bin>     Compare the PCM contents against a file");
             Console.WriteLine("  erase                      Erase the flash (recovery)");
+            Console.WriteLine("  dtcs [--clear]             Read stored trouble codes (0x19); --clear wipes them (0x14)");
+            Console.WriteLine("  vin                        Read the VIN from the PCM (0x22 F190)");
             Console.WriteLine("  seed  --seed <AABBCC>      Compute the 0x27 key for a seed (no hardware needed)");
             Console.WriteLine();
             Console.WriteLine("Options");
@@ -102,6 +109,8 @@ namespace PsychoFlash.Cli
             Console.WriteLine("  psychoflash read  --out BF_falcon_stock.bin");
             Console.WriteLine("  psychoflash write --in BF_falcon_tuned.bin --verify");
             Console.WriteLine("  psychoflash seed  --seed 6A3F12");
+            Console.WriteLine("  psychoflash dtcs");
+            Console.WriteLine("  psychoflash dtcs --clear");
         }
 
         private static Dictionary<string, string> ParseOptions(List<string> options)
@@ -294,6 +303,39 @@ namespace PsychoFlash.Cli
                 session.Flash(image, verify, CreateProgress(), cts.Token);
             }
             return 0;
+        }
+
+        private static int ReadCodes(Dictionary<string, string> parsed)
+        {
+            using (FlashSession session = CreateSession(true))
+            {
+                if (parsed.ContainsKey("clear"))
+                {
+                    if (!Confirm("Clear the stored trouble codes?")) return 1;
+                    session.ClearCodes();
+                    return 0;
+                }
+
+                IList<DiagnosticCode> codes = session.ReadCodes();
+                Console.WriteLine();
+                if (codes.Count == 0) Console.WriteLine("No stored trouble codes.");
+                foreach (DiagnosticCode code in codes)
+                {
+                    Console.WriteLine("  " + code.Code + "  status 0x" + code.Status.ToString("X2") +
+                                      (code.IsCurrent ? "  PRESENT" : code.IsConfirmed ? "  confirmed" : string.Empty) +
+                                      (code.Description.Length > 0 ? "  " + code.Description : string.Empty));
+                }
+                return 0;
+            }
+        }
+
+        private static int ReadVin()
+        {
+            using (FlashSession session = CreateSession(true))
+            {
+                string vin = session.ReadVin();
+                return string.IsNullOrEmpty(vin) ? 1 : 0;
+            }
         }
 
         private static int Verify(Dictionary<string, string> parsed)

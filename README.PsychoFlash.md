@@ -7,7 +7,9 @@ any SAE J2534 interface.
 
 It was written after reverse engineering the original tool; the full write-up is in
 [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md) and the wire protocol it speaks is in
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+[docs/PROTOCOL.md](docs/PROTOCOL.md). If you are putting a Barra into another car, read
+[docs/SWAP.md](docs/SWAP.md) - it lists what the flasher does and what the tune and the wiring
+still have to provide.
 
 ```
    PsychoFlash.exe            WinForms UI (net48 / net8.0-windows)
@@ -22,6 +24,9 @@ It was written after reverse engineering the original tool; the full write-up is
   transfer exit (`37`), optional read-back verification.
 * **Erase** only, for recovery after an interrupted flash.
 * **Verify** the PCM contents against a file.
+* **Read and clear stored fault codes** (`0x19` / `0x14`) - no FEPS needed, so it works on a car
+  that will not start. See [docs/SWAP.md](docs/SWAP.md) for what each code means in a conversion.
+* **VIN** readout (`0x22 F190`).
 * **Battery voltage** displayed and checked before every erase/write.
 * Ford **FEPS 18 V** programming voltage with an operator prompt for the ignition cycle.
 * Pluggable **seed/key** algorithms (`ISeedKeyAlgorithm`); the Falcon Spanish Oak algorithm
@@ -92,6 +97,9 @@ psychoflash read  --out BF_stock.bin
 psychoflash write --in  BF_tuned.bin --verify
 psychoflash verify --in BF_tuned.bin
 psychoflash erase                          # recovery only
+psychoflash dtcs                           # stored fault codes (0x19), works on a no-start
+psychoflash dtcs --clear                   # wipe them (0x14)
+psychoflash vin                            # VIN from the PCM (0x22 F190)
 psychoflash seed --seed 6A3F12             # offline key calculation (no hardware)
 ```
 
@@ -106,7 +114,9 @@ Options: `--dll <path>` (explicit J2534 DLL), `--device <name>`, `--profile falc
   recovery possible - but only if you have a valid image to write.
 * 18 V on the FEPS pin is applied by the J2534 interface, not by PsychoFlash.
 * PsychoFlash is an independent clean-room implementation. No code from the original tool is
-  used; the protocol facts it relies on are documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+  used; the protocol facts it relies on are documented in [docs/PROTOCOL.md](docs/PROTOCOL.md). If you are putting a Barra into another car, read
+[docs/SWAP.md](docs/SWAP.md) - it lists what the flasher does and what the tune and the wiring
+still have to provide.
   It is not affiliated with Tester Present, Ford or Aston Martin.
 * Provided under the MIT licence, without any warranty. You are responsible for what you flash.
 
@@ -126,7 +136,7 @@ src/PsychoFlash.Cli/              console front end
 tests/PsychoFlash.SelfTest/       dependency-free test runner (seed/key vectors etc.)
 tools/                            reverse engineering helpers (PyInstaller unpacker, IL recovery,
                                   reference seed/key implementation)
-docs/                             protocol and reverse engineering write-ups
+docs/                             protocol, reverse engineering, audit and swap write-ups
 ```
 
 ## Adding a new PCM variant

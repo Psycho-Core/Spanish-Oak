@@ -108,7 +108,10 @@ J2534 message framing
 1. **No checksum correction.** The 1 MB image is written verbatim. If a changed calibration needs
    a new Ford checksum, that has to be done in the tuning software before flashing. The reference
    tool has the same limitation.
-2. **No DTC or live-data screens.** Service 0x19 / 0x22 are not exposed beyond the VIN read.
+2. **No live-data screen.** Stored trouble codes are now read (`0x19 02 FF`, `psychoflash dtcs`,
+   the GUI's *Read codes* button) and can be cleared (0x14), and the VIN is readable (0x22 F190).
+   Streaming PIDs / measured values (0x22 0xF4xx, Ford's data identifiers) are still not
+   implemented - so you can see *which* code is set but not the sensor value behind it.
 3. **No bench/harness mode** (28 V on pin 13 for off-vehicle programming) - the reference tool
    does not offer it either.
 4. **Single-interface assumption.** The GUI connects to whichever J2534 driver is selected, one

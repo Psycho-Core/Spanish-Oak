@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using PsychoFlash.Core.J2534;
 using PsychoFlash.Core.Protocol;
@@ -92,6 +93,48 @@ namespace PsychoFlash.Core.Flashing
             {
                 _service.LeaveProgrammingMode();
             }
+        }
+
+        /// <summary>
+        /// Reads the stored trouble codes. Deliberately does not touch FEPS, the programming
+        /// session or security access, so it can be used on a running car to find out why it
+        /// will not start.
+        /// </summary>
+        public IList<DiagnosticCode> ReadCodes()
+        {
+            if (_client == null) throw new InvalidOperationException("Not connected.");
+            Write("=== Reading diagnostic trouble codes ===");
+            byte[] response = _client.ReadTroubleCodes();
+            IList<DiagnosticCode> codes = DiagnosticCodes.Parse(response);
+            if (codes.Count == 0)
+            {
+                Write("No stored trouble codes (raw answer: " + FordPcmClient.BytesToHex(response) + ")");
+            }
+            else
+            {
+                foreach (DiagnosticCode code in codes) Write("  " + code.ToString());
+                Write(codes.Count + " code(s) stored.");
+            }
+            return codes;
+        }
+
+        /// <summary>0x14 - clears the stored trouble codes.</summary>
+        public bool ClearCodes()
+        {
+            if (_client == null) throw new InvalidOperationException("Not connected.");
+            Write("=== Clearing diagnostic trouble codes ===");
+            bool ok = _client.ClearDiagnosticInformation();
+            Write(ok ? "Trouble codes cleared." : "The PCM did not confirm the clear.");
+            return ok;
+        }
+
+        /// <summary>The VIN reported by the PCM, or an empty string when it is not readable.</summary>
+        public string ReadVin()
+        {
+            if (_client == null) throw new InvalidOperationException("Not connected.");
+            string vin = _client.ReadVehicleIdentification();
+            Write("VIN: " + (string.IsNullOrEmpty(vin) ? "(not readable)" : vin));
+            return vin;
         }
 
         /// <summary>Reads the flash and saves it to <paramref name="path"/>.</summary>
