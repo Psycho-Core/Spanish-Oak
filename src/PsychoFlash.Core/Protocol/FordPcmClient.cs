@@ -329,8 +329,39 @@ namespace PsychoFlash.Core.Protocol
 
             // Positive answer: 0x63 followed by the data.
             if (response.Length < 2 || response[0] != 0x63) throw new InvalidOperationException("Unexpected response to 0x23 read.");
-            byte[] data = new byte[response.Length - 2];
-            Array.Copy(response, 2, data, 0, data.Length);
+            byte[] data = ExtractReadData(response, length);
+            if (data.Length != length)
+            {
+                Log("     0x23 at 0x" + address.ToString("X6") + " asked for " + length + " bytes, answer carried " +
+                    data.Length + " (raw message " + response.Length + " bytes)");
+            }
+            return data;
+        }
+
+        /// <summary>
+        /// Takes the data out of a 0x23 answer. The reference tool reads a whole image and then
+        /// throws away one byte from the start of the file, because the answer begins with the
+        /// 0x63 response byte; some EEC-VI operating systems also insert a counter byte between
+        /// 0x63 and the data. Instead of guessing, this looks at the length that was asked for:
+        /// the data is the tail of the message, so a longer answer simply means a longer prefix.
+        /// </summary>
+        public static byte[] ExtractReadData(byte[] response, int expectedLength)
+        {
+            if (response == null || response.Length == 0) return new byte[0];
+
+            int start = response[0] == 0x63 ? 1 : 0;
+            int available = response.Length - start;
+
+            // A short answer is handed back as is so the caller can report or retry it; a long
+            // answer can only mean extra prefix bytes, so keep the tail.
+            if (expectedLength > 0 && available > expectedLength)
+            {
+                start = response.Length - expectedLength;
+                available = expectedLength;
+            }
+
+            byte[] data = new byte[available];
+            Array.Copy(response, start, data, 0, available);
             return data;
         }
 

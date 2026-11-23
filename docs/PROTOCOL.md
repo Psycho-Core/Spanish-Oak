@@ -102,8 +102,10 @@ erase  0xB2 0xAA              (whole flash)
 ```
 
 The reference tool reads the full 1 MB, then discards one byte from the start of the file: the
-0x23 response carries a `0x63` response byte in front of the data. PsychoFlash strips that byte
-directly (`FordPcmClient.ReadMemory`) instead of patching the file afterwards.
+0x23 response carries a `0x63` response byte in front of the data. PsychoFlash strips the prefix
+while the data is still in memory (`FordPcmClient.ExtractReadData`), and derives it from the
+answer length so that an operating system which also inserts a counter byte after the `0x63`
+reads out correctly too - a fixed one or two byte strip would shift or reject the block.
 
 ### Dual-bank Black Oak (Aston Martin V8/V12 applications)
 

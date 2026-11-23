@@ -10,9 +10,9 @@ Method: line-by-line review of `PsychoFlash.Core` against the recovered referenc
 ## Verdict
 
 **Protocol coverage: complete for read / erase / write / verify on a BF Barra PCM.**
-Five defects were found and fixed - one of them would have made a write take about
-30 minutes instead of about 35 seconds, and the fifth was caught by the first CI run on a real
-.NET toolchain. Five capability gaps remain and are listed at the end; none of them blocks a
+Six defects were found and fixed - one of them would have made a write take about
+30 minutes instead of about 35 seconds, one would have failed every single dump, and the fifth
+was caught by the first CI run on a real .NET toolchain. Five capability gaps remain and are listed at the end; none of them blocks a
 stock read or a tuned-image flash.
 
 Continuous integration: `.github/workflows/build.yml` compiles the solution on
@@ -73,6 +73,19 @@ self test asserts a run that ends at the end of the image.
 
 Fixed: the trailing run is flushed after the loop (respecting the string limit). The test now
 covers a terminated run, a trailing run and the limit.
+
+### 6. `0x23` answers were stripped by a fixed two bytes (major, would break every dump)
+
+`ReadMemory` copied the answer from index 2, i.e. it assumed the PCM answers
+`63 <counter> <data>`. Standard UDS - and the layout that made the reference tool throw away one
+byte from the start of its file - is `63 <data>`, which is one byte shorter. With a standard
+answer a 0x400 byte read came back as 0x3FF bytes, the length check in `ReadImage` retried it
+three times and the read died with "Flash read failed at address 0x000000"; the Black Oak profile
+would have silently shifted by one byte instead.
+
+Fixed: `FordPcmClient.ExtractReadData` now derives the prefix from the answer length, so both
+layouts work, and a short answer is logged and reported instead of being padded. Covered by four
+self-test cases, including a full size block.
 
 ## Contract tests added
 

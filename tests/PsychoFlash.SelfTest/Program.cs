@@ -24,6 +24,7 @@ namespace PsychoFlash.SelfTest
             TestProfileMapping();
             TestFalconProfileContract();
             TestFrameConstruction();
+            TestReadResponseFraming();
             TestImageTools();
             TestNegativeResponseCodes();
 
@@ -173,6 +174,39 @@ namespace PsychoFlash.SelfTest
             PcmProfile blackOak = PcmProfile.BlackOakDual();
             byte[] big = FordPcmClient.BuildFrame(blackOak, new byte[0x401]);
             CheckEqual(0x405, big.Length, "multi-frame transfer length");
+        }
+
+        /// <summary>
+        /// The 0x23 answer layout is the one thing that can silently corrupt a dump: too many
+        /// skipped prefix bytes shift the whole image, too few leave the 0x63 in it.
+        /// </summary>
+        private static void TestReadResponseFraming()
+        {
+            Console.WriteLine("0x23 read response framing");
+
+            byte[] plain = new byte[] { 0x63, 0x01, 0x02, 0x03, 0x04 };
+            byte[] a = FordPcmClient.ExtractReadData(plain, 4);
+            Check(a.Length == 4 && a[0] == 0x01 && a[3] == 0x04, "0x63 then data (standard UDS layout)");
+
+            byte[] withCounter = new byte[] { 0x63, 0x00, 0x01, 0x02, 0x03, 0x04 };
+            byte[] b = FordPcmClient.ExtractReadData(withCounter, 4);
+            Check(b.Length == 4 && b[0] == 0x01 && b[3] == 0x04, "0x63 then a counter byte then data");
+
+            byte[] stripped = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+            byte[] c = FordPcmClient.ExtractReadData(stripped, 4);
+            Check(c.Length == 4 && c[0] == 0x01, "interface already stripped the response byte");
+
+            byte[] shortAnswer = new byte[] { 0x63, 0x01, 0x02 };
+            byte[] d = FordPcmClient.ExtractReadData(shortAnswer, 4);
+            Check(d.Length == 2 && d[0] == 0x01, "short answer is reported to the caller, not padded");
+
+            // A full size block - the case the read loop actually lives in.
+            byte[] block = new byte[0x401];
+            block[0] = 0x63;
+            for (int i = 1; i < block.Length; i++) block[i] = (byte)(i & 0xFF);
+            byte[] full = FordPcmClient.ExtractReadData(block, 0x400);
+            Check(full.Length == 0x400 && full[0] == 0x01 && full[0x3FF] == (byte)(0x400 & 0xFF),
+                  "0x400 byte block loses exactly one prefix byte");
         }
 
         private static void TestImageTools()
