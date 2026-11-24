@@ -455,6 +455,14 @@ namespace PsychoFlash.App
                 return;
             }
 
+            string problem = FlashService.DescribeWriteProblem(image);
+            if (problem != null)
+            {
+                MessageBox.Show(this, problem + "\r\n\r\nNothing was sent to the PCM.",
+                    "PsychoFlash - blank image", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             string message = "About to erase and reprogram this PCM with:\r\n\r\n" + Path.GetFileName(dialog.FileName) +
                              "\r\n" + image.Length + " bytes\r\nSHA-256: " + FlashService.Hash(image) +
                              "\r\n\r\nDo not interrupt the process.";
@@ -475,6 +483,15 @@ namespace PsychoFlash.App
             dialog.Filter = "Binary flash image (*.bin)|*.bin|All files (*.*)|*.*";
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             byte[] image = File.ReadAllBytes(dialog.FileName);
+            PcmProfile verifyProfile = SelectedProfile();
+            if (image.Length != verifyProfile.ImageSize)
+            {
+                MessageBox.Show(this,
+                    "This file is " + image.Length + " bytes, but " + verifyProfile.Name + " needs " +
+                    verifyProfile.ImageSize + " bytes.",
+                    "PsychoFlash - wrong image size", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
             RunBackground("Verifying flash", delegate(CancellationToken token, Progress<FlashProgress> progress)
             {

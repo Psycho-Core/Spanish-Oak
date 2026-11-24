@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using PsychoFlash.Core.Flashing;
 using PsychoFlash.Core.Protocol;
+using PsychoFlash.Core.J2534;
 
 namespace PsychoFlash.SelfTest
 {
@@ -26,9 +27,14 @@ namespace PsychoFlash.SelfTest
             TestAlgorithmBag();
             TestFrameConstruction();
             TestReadResponseFraming();
+            TestSingleByteAnswers();
+            TestShortSeedAnswer();
+            TestWriteGuards();
+            TestWriteWindowMapping();
             TestImageTools();
             TestImageDiffAndChecksums();
             TestChecksumDiscovery();
+            TestEndToEnd();
             TestObdPids();
             TestDiagnosticCodes();
             TestNegativeResponseCodes();
@@ -276,6 +282,172 @@ namespace PsychoFlash.SelfTest
                   "0x400 byte block loses exactly one prefix byte");
         }
 
+        /// <summary>
+        /// Spanish Oak answers 0x36, 0x37 and 0xB2 with a single byte (0x76, 0x77, 0xF2). A client
+        /// that throws away one byte payloads as padding reads a perfectly good block
+        /// acknowledgement as silence, and the flash dies on the first block - which is exactly what
+        /// the simulated PCM caught. This pins the smallest possible answer down.
+        /// </summary>
+        private static void TestSingleByteAnswers()
+        {
+            Console.WriteLine("Single byte positive answers");
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { (byte)(service + 0x40) }; }))
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                Check(client.EraseFlash(), "0xF2 alone is a complete erase answer");
+                bool transferred = true;
+                try { client.TransferData(new byte[4]); }
+                catch (Exception ex) { transferred = false; Console.WriteLine("    transfer data threw: " + ex.Message); }
+                Check(transferred, "0x76 alone acknowledges a data block");
+                Check(client.TransferExit(), "0x77 alone is a complete transfer exit answer");
+            }
+        }
+
+        /// <summary>
+        /// An answer shorter than the seed the algorithm expects has to be reported. Reading past
+        /// the end of the buffer threw IndexOutOfRangeException from inside the unlock, which told
+        /// the operator nothing about what the PCM had actually said.
+        /// </summary>
+        private static void TestShortSeedAnswer()
+        {
+            Console.WriteLine("Short 0x27 seed answer");
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { 0x67, 0x01, 0xAA }; }))
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                bool reported = false;
+                try
+                {
+                    client.SecurityAccess(SeedKeyAlgorithms.FordSpanishOak);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    reported = ex.Message.IndexOf("seed", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("    wrong exception type: " + ex.GetType().Name + ": " + ex.Message);
+                }
+                Check(reported, "a short seed answer is refused with a readable message, not an index error");
+            }
+        }
+
+        /// <summary>
+        /// The two gates that stand between a mistake and an erased PCM: a blank image and an image
+        /// of the wrong size. Both are cheap to test here and expensive to get wrong in a driveway.
+        /// </summary>
+        private static void TestWriteGuards()
+        {
+            Console.WriteLine("Write guards");
+
+            Check(FlashService.DescribeWriteProblem(null) != null, "no image is refused");
+            Check(FlashService.DescribeWriteProblem(new byte[0]) != null, "an empty file is refused");
+
+            byte[] erased = new byte[0x100000];
+            for (int i = 0; i < erased.Length; i++) erased[i] = 0xFF;
+            Check(FlashService.DescribeWriteProblem(erased) != null, "an all-0xFF image is refused");
+            Check(FlashService.DescribeWriteProblem(new byte[0x100000]) != null, "an all-0x00 image is refused");
+
+            byte[] populated = new byte[0x100000];
+            for (int i = 0; i < populated.Length; i++) populated[i] = (byte)(i * 7);
+            Check(FlashService.DescribeWriteProblem(populated) == null, "a populated image is accepted");
+
+            using (ScriptedDevice device = new ScriptedDevice(
+                delegate(byte service) { return new byte[] { (byte)(service + 0x40) }; }))
+            {
+                FordPcmClient client = new FordPcmClient(device, PcmProfile.SpanishOakFalcon(), null);
+                FlashService service = new FlashService(client, null);
+                bool refused = false;
+                try
+                {
+                    service.VerifyImage(new byte[0x800], null, System.Threading.CancellationToken.None);
+                }
+                catch (ArgumentException)
+                {
+                    refused = true;
+                }
+                Check(refused, "verify refuses an image of the wrong size before touching the PCM");
+
+                bool writeRefused = false;
+                try
+                {
+                    service.WriteImage(new byte[0x800], null, System.Threading.CancellationToken.None);
+                }
+                catch (ArgumentException)
+                {
+                    writeRefused = true;
+                }
+                Check(writeRefused, "write refuses an image of the wrong size before touching the PCM");
+            }
+        }
+
+        /// <summary>
+        /// Which parts of the image a write really programs. `diff` uses this to say whether a
+        /// change would be flashed, and on the dual bank profile only the first window used to be
+        /// considered - every change in the second bank was labelled "will not be flashed".
+        /// </summary>
+        private static void TestWriteWindowMapping()
+        {
+            Console.WriteLine("Write window mapping");
+            PcmProfile falcon = PcmProfile.SpanishOakFalcon();
+            Check(!falcon.IsImageOffsetWritten(0x000000, 0x1000), "boot block is outside the write window (Falcon)");
+            Check(falcon.IsImageOffsetWritten(0x010000, 1), "first calibration byte is written (Falcon)");
+            Check(falcon.IsImageOffsetWritten(0x0FFFFF, 1), "last byte of the image is written (Falcon)");
+
+            PcmProfile dual = PcmProfile.BlackOakDual();
+            Check(!dual.IsImageOffsetWritten(0x000000, 0x1000), "boot block is outside the write window (Black Oak)");
+            Check(dual.IsImageOffsetWritten(0x6FFFF, 1), "end of the first bank is written (Black Oak)");
+            Check(dual.IsImageOffsetWritten(0x70000, 1), "second bank at image 0x70000 is written (Black Oak)");
+        }
+
+        /// <summary>
+        /// An interface that answers whatever the test scripts for it - usually the shortest legal
+        /// answer, the positive response byte alone - so response matching can be exercised without
+        /// a PCM or a J2534 DLL.
+        /// </summary>
+        private sealed class ScriptedDevice : IPassThruDevice
+        {
+            private readonly Queue<byte[]> _answers = new Queue<byte[]>();
+            private readonly Func<byte, byte[]> _responder;
+
+            public ScriptedDevice(Func<byte, byte[]> responder)
+            {
+                if (responder == null) throw new ArgumentNullException("responder");
+                _responder = responder;
+            }
+
+            public string FirmwareVersion { get { return "scripted"; } }
+            public string DllVersion { get { return "scripted"; } }
+            public string ApiVersion { get { return "04.04"; } }
+
+            public uint ReadBatteryVoltage() { return 12000; }
+            public void SetProgrammingVoltage(uint pinNumber, uint voltage) { }
+            public void ClearBuffers() { _answers.Clear(); }
+
+            public void WriteMessage(byte[] canIdAndPayload, TxFlags flags, uint timeoutMs)
+            {
+                byte service = canIdAndPayload[4];
+                byte[] payload = _responder(service);
+                if (payload == null || payload.Length == 0) return;
+                byte[] frame = new byte[payload.Length + 4];
+                frame[0] = 0x00;
+                frame[1] = 0x00;
+                frame[2] = 0x07;
+                frame[3] = 0xE8;
+                Array.Copy(payload, 0, frame, 4, payload.Length);
+                _answers.Enqueue(frame);
+            }
+
+            public byte[] ReadMessage(uint timeoutMs)
+            {
+                if (_answers.Count == 0) throw new TimeoutException("nothing queued");
+                return _answers.Dequeue();
+            }
+
+            public void Dispose() { }
+        }
+
         private static void TestImageTools()
         {
             Console.WriteLine("Image helpers");
@@ -475,6 +647,134 @@ namespace PsychoFlash.SelfTest
             data[offset + 1] = (byte)(value >> 16);
             data[offset + 2] = (byte)(value >> 8);
             data[offset + 3] = (byte)value;
+        }
+
+        /// <summary>
+        /// The whole tool against a simulated PCM: unlock, dump, flash, verify, codes, live data.
+        ///
+        /// This is what "tested without a car" means here. The real client, service and framing code
+        /// run unchanged against an in-memory PCM that speaks the recovered protocol and enforces
+        /// FEPS, security access and block transfer. It does not prove the PCM on your bench behaves
+        /// the same way - it proves the software does what it says when something answers correctly.
+        /// </summary>
+        private static void TestEndToEnd()
+        {
+            Console.WriteLine("End to end against a simulated PCM");
+
+            PcmProfile profile = PcmProfile.SpanishOakFalcon();
+            profile.EraseSettleMilliseconds = 5;          // keep the self test quick
+
+            SimulatedPcm pcm = new SimulatedPcm();
+            List<string> log = new List<string>();
+            FordPcmClient client = new FordPcmClient(pcm, profile, delegate(string m) { log.Add(m); });
+            FlashService service = new FlashService(client, delegate(string m) { log.Add(m); });
+
+            // --- programming mode needs FEPS, and says so when it is missing ---
+            Check(!pcm.ProgrammingVoltageApplied, "no FEPS before programming mode");
+            service.EnterProgrammingMode(false);
+            Check(pcm.ProgrammingVoltageApplied, "FEPS applied on entering programming mode");
+            Check(pcm.AppliedVoltage == profile.ProgrammingVoltage * 1000, "FEPS applied at the profile voltage");
+
+            // --- unlock, with the real key algorithm against the real seed ---
+            Check(service.Unlock(SeedKeyAlgorithms.FordSpanishOak), "unlock accepted by the simulated PCM");
+            Check(pcm.Unlocked, "PCM reports itself unlocked");
+
+            // --- dump, byte for byte ---
+            byte[] stock = service.ReadImage(null, System.Threading.CancellationToken.None);
+            CheckEqual(SimulatedPcm.ImageSize, stock.Length, "dump is exactly 1 MB");
+            Check(SameBytes(stock, pcm.Flash), "dump matches the simulated flash byte for byte");
+            Check(SameBytes(stock, pcm.Flash), "and no byte is shifted (pattern is position dependent)");
+
+            // --- the legacy read layout must produce the same image ---
+            pcm.LegacyReadPrefix = true;
+            byte[] stock2 = service.ReadImage(null, System.Threading.CancellationToken.None);
+            Check(SameBytes(stock, stock2), "both 0x23 response layouts produce an identical dump");
+            pcm.LegacyReadPrefix = false;
+
+            // --- write a modified image, the way a tune would ---
+            byte[] tuned = new byte[stock.Length];
+            Array.Copy(stock, tuned, stock.Length);
+            tuned[0x020000] = 0x12;
+            tuned[0x080000] = 0x34;
+            tuned[0x0FFFFF] = 0x56;
+
+            try
+            {
+                service.WriteImage(tuned, null, System.Threading.CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Check(false, "write failed: " + ex.Message + "  | last PCM trace: " + Tail(pcm, 10));
+            }
+            Check(pcm.BlocksTransferred == (0x0F0000 / profile.WriteBlockSize),
+                  "every block of the write window was transferred (" + pcm.BlocksTransferred + ")");
+            CheckEqual(0, FirstDifference(pcm.Flash, tuned, 0x010000, 0x0F0000), "flashed bytes match the file");
+            CheckEqual(0xFF, pcm.Flash[0x000000], "boot block was erased but never written");
+
+            // --- verify catches a match and a mismatch ---
+            CheckEqual(0, service.VerifyImage(tuned, null, System.Threading.CancellationToken.None), "verify passes on the file just flashed");
+            byte[] tampered = new byte[tuned.Length];
+            Array.Copy(tuned, tampered, tuned.Length);
+            tampered[0x050000] ^= 0xFF;
+            Check(service.VerifyImage(tampered, null, System.Threading.CancellationToken.None) > 0, "verify reports differing bytes");
+
+            // --- diagnostics through the same transport ---
+            IList<DiagnosticCode> codes = DiagnosticCodes.Parse(client.ReadTroubleCodes());
+            CheckEqual(2, codes.Count, "trouble codes read from the PCM");
+            Check(codes.Count == 2 && codes[0].Code == "P0123" && codes[1].Code == "P1260", "codes decoded end to end");
+
+            byte[] rpm = client.ReadPid(0x0C);
+            Check(rpm != null && ObdPids.Format(0x0C, rpm) == "1000 rpm", "live data decoded end to end");
+
+            string vin = client.ReadVehicleIdentification();
+            Check(vin == "6FPAAAJGSW4A12345", "VIN read end to end");
+
+            // --- and it refuses politely when the key is wrong ---
+            SimulatedPcm strict = new SimulatedPcm();
+            strict.SetProgrammingVoltage(profile.ProgrammingPin, (uint)profile.ProgrammingVoltage * 1000);
+            FordPcmClient wrong = new FordPcmClient(strict, profile, delegate { });
+            bool refused = false;
+            try
+            {
+                wrong.SecurityAccess(new FordSeedKeyMkI(0x00, 0x00, 0x00, 0x00, 0x00, "deliberately wrong"));
+            }
+            catch (NegativeResponseException ex)
+            {
+                refused = ex.Code == 0x35;
+            }
+            Check(refused, "a wrong key raises NRC 0x35 rather than being reported as success");
+
+            service.LeaveProgrammingMode();
+            Check(!pcm.ProgrammingVoltageApplied, "FEPS removed on leaving programming mode");
+            Check(log.Count > 10, "the log recorded the session (" + log.Count + " lines)");
+        }
+
+        private static string Tail(SimulatedPcm pcm, int count)
+        {
+            int start = Math.Max(0, pcm.Trace.Count - count);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int i = start; i < pcm.Trace.Count; i++)
+            {
+                if (sb.Length > 0) sb.Append(" | ");
+                sb.Append(pcm.Trace[i]);
+            }
+            return sb.ToString();
+        }
+
+        private static bool SameBytes(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
+        }
+
+        private static int FirstDifference(byte[] a, byte[] b, int offset, int length)
+        {
+            for (int i = offset; i < offset + length && i < a.Length && i < b.Length; i++)
+            {
+                if (a[i] != b[i]) return i;
+            }
+            return 0;
         }
 
         private static void TestNegativeResponseCodes()

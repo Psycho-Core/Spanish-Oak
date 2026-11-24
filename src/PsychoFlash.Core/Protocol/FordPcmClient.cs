@@ -74,12 +74,12 @@ namespace PsychoFlash.Core.Protocol
         public const byte ServiceControlDtcSetting = 0x85;
         public const byte ServiceEraseFlash = 0xB2;
 
-        private readonly J2534Device _device;
+        private readonly IPassThruDevice _device;
         private readonly PcmProfile _profile;
         private readonly Action<string> _log;
         private readonly object _sync = new object();
 
-        public FordPcmClient(J2534Device device, PcmProfile profile, Action<string> log)
+        public FordPcmClient(IPassThruDevice device, PcmProfile profile, Action<string> log)
         {
             if (device == null) throw new ArgumentNullException("device");
             if (profile == null) throw new ArgumentNullException("profile");
@@ -89,7 +89,7 @@ namespace PsychoFlash.Core.Protocol
         }
 
         public PcmProfile Profile { get { return _profile; } }
-        public J2534Device Device { get { return _device; } }
+        public IPassThruDevice Device { get { return _device; } }
 
         /// <summary>Default per-request timeout in milliseconds (response pending restarts it).</summary>
         public uint ResponseTimeout { get; set; } = 2000;
@@ -196,9 +196,13 @@ namespace PsychoFlash.Core.Protocol
                 silentReads = 0;
 
                 byte[] data = StripCanId(raw);
-                if (data.Length < 2) continue;
 
-                if (data[0] == 0x7F)
+                // A positive answer to 0x36, 0x37 or 0xB2 is a single byte (0x76, 0x77, 0xF2),
+                // so a one byte payload is a complete answer, not padding. Only a frame that
+                // carried no payload at all is ignored.
+                if (data.Length < 1) continue;
+
+                if (data[0] == 0x7F && data.Length >= 3)
                 {
                     byte service = data.Length > 1 ? data[1] : (byte)0;
                     byte code = data.Length > 2 ? data[2] : (byte)0;
@@ -290,6 +294,15 @@ namespace PsychoFlash.Core.Protocol
             byte[] requestSeed = new byte[] { ServiceSecurityAccess, 0x01 };
             byte[] seedResponse = Request(requestSeed, 2 + algorithm.SeedLength);
             if (seedResponse[0] != 0x67) return false;
+            if (seedResponse.Length < 2 + algorithm.SeedLength)
+            {
+                // Reading past the end here used to throw IndexOutOfRangeException from inside the
+                // unlock, which told the operator nothing at all.
+                throw new InvalidOperationException("The 0x27 seed answer carried " + seedResponse.Length +
+                    " byte(s) [" + BytesToHex(seedResponse) + "] but this algorithm needs " +
+                    (2 + algorithm.SeedLength) + " for a " + algorithm.SeedLength +
+                    "-byte seed. No key was sent, so no security attempt was used.");
+            }
 
             uint seed = 0;
             for (int i = 0; i < algorithm.SeedLength; i++)

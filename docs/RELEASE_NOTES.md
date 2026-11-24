@@ -14,6 +14,21 @@ Tactrix Openport, etc.).
 | `PsychoFlash-net8.0-windows.zip` | Framework dependent build for .NET 8 desktop. |
 | `psychoflash-cli-net8.0.zip` | Command line version for scripting and batch work. |
 
+## Correctness pass in this build
+
+The flasher is now driven end to end by a simulated Spanish Oak PCM, so the real `J2534Device`,
+`FordPcmClient` and `FlashService` code runs a full 1 MB read, a 960 block write, a verify, a DTC
+read and a VIN read in CI - no interface, no car. It found two defects that would have stopped the
+first real flash:
+
+* **FEPS was requested in volts, not millivolts.** The tool asked every interface for 18 mV instead
+  of 18 V, which means no programming voltage, no programming session and every unlock refused.
+* **Single byte positive answers were discarded as padding.** `0x76`, `0x77` and `0xF2` are one byte
+  each, so every block acknowledgement was read as silence and the write died on block 1 of 960.
+
+Both are fixed and pinned by tests. This build also refuses to write a blank image, checks the
+image size before it touches the PCM, and fixes `erase` ignoring a keybag. See `docs/AUDIT.md`.
+
 ## New in this release
 
 * **Checksum discovery** - `psychoflash checksums --in stock.bin --b known-good.bin` finds the
@@ -89,9 +104,9 @@ psychoflash seed --seed AABBCC
 ## Read this before the first flash
 
 * This code has **never been run against a real PCM**. It was written from a protocol
-  reconstruction of the original tool and validated with contract tests, but the first session on
-  a car should be a **read only**. See `docs/AUDIT.md` for the full audit, the five known gaps
-  and a first-session checklist.
+  reconstruction of the original tool and is now validated end to end against a simulated PCM as
+  well as by contract tests, but the first session on a car should still be a **read only**.
+  See `docs/AUDIT.md` for the full audit, the known gaps and a first-session checklist.
 * Flashing **does not fix Ford checksums**. If the calibration changed, apply the checksum in your
   tuning software first.
 * Keep the original 1 MB read. That file is your recovery path.

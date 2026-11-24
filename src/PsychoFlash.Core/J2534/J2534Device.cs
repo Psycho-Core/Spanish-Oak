@@ -9,7 +9,7 @@ namespace PsychoFlash.Core.J2534
     /// Friendly wrapper around a J2534 interface: opens the device, brings up an ISO15765
     /// (CAN) channel, programs the message filter and exposes blocking read/write helpers.
     /// </summary>
-    public sealed class J2534Device : IDisposable
+    public sealed class J2534Device : IPassThruDevice
     {
         private readonly J2534Library _lib;
         private uint _deviceId;
@@ -286,8 +286,14 @@ namespace PsychoFlash.Core.J2534
         /// <summary>Drives the Ford FEPS line (18 V) used to put the PCM into programming mode.</summary>
         public void SetProgrammingVoltage(uint pinNumber, uint voltage)
         {
+            // Millivolts, as the J2534 API defines it - the caller converts the profile's volts.
+            // Passing volts straight through asked interfaces for 18 mV (no FEPS at all) until the
+            // simulated PCM in the self test caught it.
             J2534Err err = _lib.SetProgrammingVoltage(_deviceId, pinNumber, voltage);
-            if (err != J2534Err.STATUS_NOERROR) throw new J2534Exception("PassThruSetProgrammingVoltage(pin " + pinNumber + ", " + voltage + "V)", err);
+            if (err != J2534Err.STATUS_NOERROR)
+            {
+                throw new J2534Exception("PassThruSetProgrammingVoltage(pin " + pinNumber + ", " + voltage + " mV)", err);
+            }
         }
 
         /// <summary>Writes one message; the interface performs ISO-TP segmentation automatically.</summary>
@@ -318,6 +324,17 @@ namespace PsychoFlash.Core.J2534
                 for (int i = 0; i < size; i++) Marshal.WriteByte(ptr, i, 0);
                 uint count = 1;
                 J2534Err err = _lib.ReadMsgs(_channelId, ptr, ref count, timeoutMs);
+
+                // "Nothing arrived" is not an error, it is the normal way for a read to end. The
+                // interface contract promises a TimeoutException for it, so drivers that report
+                // ERR_TIMEOUT / ERR_BUFFER_EMPTY instead of returning zero messages are translated
+                // here rather than leaking a J2534Exception into the protocol code.
+                if (err == J2534Err.ERR_TIMEOUT || err == J2534Err.ERR_BUFFER_EMPTY ||
+                    err == J2534Err.ERR_ISO15765_RX_TIMEOUT || err == J2534Err.ERR_ISO15765_TX_FC_TIMEOUT)
+                {
+                    throw new TimeoutException("No message from the interface within " + timeoutMs +
+                                               " ms (" + err + ").");
+                }
                 if (err != J2534Err.STATUS_NOERROR) throw new J2534Exception("PassThruReadMsgs", err);
                 if (count == 0) return new byte[0];
                 PassThruMsg msg = (PassThruMsg)Marshal.PtrToStructure(ptr, typeof(PassThruMsg));

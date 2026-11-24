@@ -150,6 +150,26 @@ namespace PsychoFlash.Core.Protocol
             return list;
         }
 
+        /// <summary>
+        /// True when a flash write would actually program this range of the image file. The ranges
+        /// are the write segments taken through <see cref="MapAddressToImageOffset"/>, so the dual
+        /// bank profile (two windows, the second at 0x500000) answers this correctly too - testing
+        /// only the first segment mislabels every change in the second bank.
+        /// </summary>
+        public bool IsImageOffsetWritten(int imageOffset, int length)
+        {
+            if (length < 1) length = 1;
+            if (imageOffset < 0) return false;
+            foreach (FlashSegment segment in WriteSegments)
+            {
+                int start = MapAddressToImageOffset(segment.Address);
+                if (start < 0) continue;
+                int end = start + segment.Length;
+                if (imageOffset < end && imageOffset + length > start) return true;
+            }
+            return false;
+        }
+
         /// <summary>Maps a memory address to an offset inside the image file, or -1 if unmapped.</summary>
         public int MapAddressToImageOffset(int address)
         {

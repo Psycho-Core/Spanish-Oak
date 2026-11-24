@@ -93,7 +93,7 @@ namespace PsychoFlash.Core.Flashing
         public void EnterProgrammingMode(bool promptForIgnitionCycle)
         {
             Log("Enabling FEPS (" + _profile.ProgrammingVoltage + " V) ...");
-            _client.Device.SetProgrammingVoltage(_profile.ProgrammingPin, _profile.ProgrammingVoltage);
+            _client.Device.SetProgrammingVoltage(_profile.ProgrammingPin, (uint)_profile.ProgrammingVoltage * 1000);
 
             if (promptForIgnitionCycle && RequestOperatorAction != null)
             {
@@ -331,11 +331,7 @@ namespace PsychoFlash.Core.Flashing
         public void WriteImage(byte[] image, IProgress<FlashProgress> progress, CancellationToken token)
         {
             if (image == null) throw new ArgumentNullException("image");
-            if (image.Length != _profile.ImageSize)
-            {
-                throw new ArgumentException("Image is " + image.Length + " bytes but this PCM needs " +
-                                            _profile.ImageSize + " bytes (" + (_profile.ImageSize / 1024) + " kB).");
-            }
+            RequireImageSize(image);
 
             int total = _profile.TotalWriteBytes;
             int sent = 0;
@@ -400,6 +396,10 @@ namespace PsychoFlash.Core.Flashing
         public int VerifyImage(byte[] expected, IProgress<FlashProgress> progress, CancellationToken token)
         {
             if (expected == null) throw new ArgumentNullException("expected");
+
+            // A short file used to fail with IndexOutOfRangeException halfway through the compare,
+            // i.e. after the PCM had already been unlocked. Say what is wrong before touching it.
+            RequireImageSize(expected);
             int total = _profile.TotalWriteBytes;
             int checkedBytes = 0;
             int differences = 0;
@@ -424,6 +424,35 @@ namespace PsychoFlash.Core.Flashing
             return differences;
         }
 
+        /// <summary>Rejects an image that is not the size this PCM needs, before anything is touched.</summary>
+        private void RequireImageSize(byte[] image)
+        {
+            if (image.Length != _profile.ImageSize)
+            {
+                throw new ArgumentException("Image is " + image.Length + " bytes but this PCM needs " +
+                                            _profile.ImageSize + " bytes (" + (_profile.ImageSize / 1024) + " kB).");
+            }
+        }
+
+        /// <summary>
+        /// Why an image must not be written, or null when nothing obvious is wrong with it. A blank
+        /// image is the dangerous case: an all-0x00 or all-0xFF megabyte is what a failed read, an
+        /// empty file or a padded template produces, and writing one erases a working PCM for
+        /// nothing. The GUI and the CLI both ask this before they offer to flash anything.
+        /// </summary>
+        public static string DescribeWriteProblem(byte[] image)
+        {
+            if (image == null) return "There is no image to write.";
+            if (image.Length == 0) return "The file is empty.";
+            if (ImageTools.IsBlank(image))
+            {
+                return "Every byte of the image is 0x" + image[0].ToString("X2") +
+                       ", which means this is a blank image (a failed read or an empty template), " +
+                       "not a calibration.";
+            }
+            return null;
+        }
+
         /// <summary>SHA-256 of an image, handy for build logs and release notes.</summary>
         public static string Hash(byte[] image)
         {
@@ -437,7 +466,6 @@ namespace PsychoFlash.Core.Flashing
         }
     }
 
-    /// <summary>Helpers for the binary files themselves.</summary>
     /// <summary>A contiguous run of bytes that differs between two images.</summary>
     public sealed class ImageDifference
     {

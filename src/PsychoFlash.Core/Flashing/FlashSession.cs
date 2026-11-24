@@ -192,7 +192,10 @@ namespace PsychoFlash.Core.Flashing
             _service.EnterProgrammingMode(true);
             try
             {
-                if (!_service.Unlock(KeyAlgorithm)) throw new InvalidOperationException("Security access was not granted.");
+                // Same rule as every other operation: a keybag, when one is configured, is what
+                // has to be tried. Using the single algorithm here made "erase" fail on a PCM that
+                // the read and write paths could unlock.
+                if (!UnlockPcm()) throw new InvalidOperationException("Security access was not granted.");
                 _service.Erase(progress, token);
             }
             finally

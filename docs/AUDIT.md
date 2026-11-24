@@ -87,6 +87,73 @@ Fixed: `FordPcmClient.ExtractReadData` now derives the prefix from the answer le
 layouts work, and a short answer is logged and reported instead of being padded. Covered by four
 self-test cases, including a full size block.
 
+### 7. FEPS was requested in volts instead of millivolts (critical, no unlock possible on a car)
+
+`J2534Device.SetProgrammingVoltage` passed the profile voltage straight to
+`PassThruSetProgrammingVoltage`, which the J2534 API defines in **millivolts**. The tool therefore
+asked every interface for 18 mV instead of 18 V: no programming voltage, no programming session,
+and every unlock refused with `0x33`/`0x22` - on a real car, the tool would not have worked at all,
+and the failure would have looked like a wiring fault.
+
+Found by the simulated PCM in the self test, which asserts the voltage the interface is asked for.
+Fixed by converting to millivolts in the device layer and printing both units in the error message.
+
+### 8. Single byte answers were thrown away as padding (critical, no flash possible)
+
+`WaitForResponse` skipped any message whose payload was shorter than two bytes, on the assumption
+that a one byte frame is filler. On this protocol the positive answers to `0x36`, `0x37` and `0xB2`
+are exactly one byte (`0x76`, `0x77`, `0xF2`), so every block acknowledgement was discarded, the
+client read silence for 60 rounds and reported "No response from the PCM for service 0x36".
+
+This is the defect that ended the run above it: defect 1 was fixed so that the *first complete
+message* is returned, but the length filter in front of it still ate the acknowledgement. On a car
+the erase would have looked silent (tolerated, since some PCMs do stop answering during an erase)
+and the write would have died on block 1 of 960 with a message blaming ignition, FEPS and wiring.
+
+Found by the simulated PCM, which answers like the real thing: only a frame with no payload at all
+is ignored now, and a negative response is only read as one when its three bytes are present.
+Pinned by a self-test case that answers every request with the response byte alone.
+
+## Verification pass 2 (simulated PCM + second code review)
+
+### The harness
+
+`IPassThruDevice` is the whole surface the protocol code needs from a J2534 interface
+(`J2534Device` implements it). Behind it the self test now runs `SimulatedPcm`, a message level
+Spanish Oak 1024k emulator: FEPS gating, `0x10`/`0x85`/`0x3E`, a real `0x27` seed/key exchange
+against `FordSeedKeyMkI` with the `0x35`/`0x36` refusals, `0x23` in both answer layouts, `0xB2`
+erase, `0x34` download with a `0x78` response-pending detour, `0x36`/`0x37` transfer, `0x19` DTCs,
+`0x22` VIN and `0x01` live data.
+
+`TestEndToEnd` then drives the real `FordPcmClient` and `FlashService` through a complete session:
+1 MB dump compared byte for byte, both read layouts identical, 960 block write of
+`0x010000-0x0FFFFF`, boot block erased but never written, verify pass and fail, DTCs, live data,
+VIN, a wrong key refused with `0x35`, and FEPS applied and removed.
+
+It earns its keep: it found defects 7 and 8 below, both of which would have stopped the first real
+flash and neither of which could be seen by reading the code.
+
+### Defects found in this pass and fixed
+
+| Defect | Consequence |
+| --- | --- |
+| `write` flashed a blank image | An all-`0x00`/`0xFF` megabyte is what a failed read or an empty template produces. `psychoflash write --in blank.bin` would erase a working PCM and leave the car unable to start, with only a confirm prompt in the way. Now refused by `FlashService.DescribeWriteProblem`; the CLI needs `--force`, the GUI refuses outright. |
+| `verify` on a short file crashed mid-session | `VerifyImage` indexed the expected image without checking its length, so a short file threw `IndexOutOfRangeException` *after* the PCM had been unlocked and the session opened. Now checked before anything is touched, in the service as well as both front ends. |
+| `erase` ignored a configured keybag | `FlashSession.Erase` called the single-algorithm `Unlock`, so on a PCM that needed a keybag the read and write worked and `erase` refused. Now uses the same `UnlockPcm` as everything else. |
+| Short `0x27` seed answer threw `IndexOutOfRangeException` | The seed was read from a fixed offset without checking the answer length; the operator got a .NET exception instead of what the PCM had said. Now a message that quotes the raw answer and states that no security attempt was used. |
+| `diff` mislabelled the dual bank profile | "Will be flashed" was decided from `WriteSegments[0]` only, so every change in the second Black Oak bank (image 0x70000+) was labelled "OUTSIDE write window". Now `PcmProfile.IsImageOffsetWritten` checks every window through the read-segment mapping. |
+| `ReadMessage` broke its own contract | The interface documents `TimeoutException` for "nothing arrived"; drivers that return `ERR_TIMEOUT`/`ERR_BUFFER_EMPTY` produced a `J2534Exception` instead. Translated now. |
+
+### What is still unverified, honestly
+
+* Real PCM timing and silence, the FEPS hardware itself, how long a real erase takes, and the
+  wiring. The emulator answers correctly, but it was written from the same recovered protocol as
+  the client, so a real PCM that deviates from that reconstruction will surprise the tool.
+* The dual-bank Black Oak profile: its `0x34` size field (`00 00 10 00`) does not agree with its own
+  1 MB write window, and it is reproduced verbatim from the reference trace rather than understood.
+  Treat Black Oak as untested.
+* Ford's own checksum scheme. The scanner measures, it does not guess (see `docs/CHECKSUMS.md`).
+
 ## Contract tests added
 
 `tests/PsychoFlash.SelfTest` now fails the build if any BF Barra constant drifts:
